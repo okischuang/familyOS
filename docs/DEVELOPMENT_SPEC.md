@@ -1,4 +1,4 @@
-# EaseMind MVP - Development Specification
+# Laxie MVP - Development Specification
 Version: 1.0
 Last Updated: 2026-01-08
 
