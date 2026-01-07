@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const EaseMindWireframes = () => {
+const LaxieWireframes = () => {
   const [currentScreen, setCurrentScreen] = useState('home');
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [selectedSolution, setSelectedSolution] = useState(null);
@@ -321,7 +321,7 @@ const EaseMindWireframes = () => {
     <PhoneFrame title="Onboarding Flow">
       <div className="text-center py-4">
         <div className="text-2xl mb-2">👋</div>
-        <div className="font-bold text-lg mb-1">歡迎來到 EaseMind</div>
+        <div className="font-bold text-lg mb-1">歡迎來到 Laxie</div>
         <div className="text-sm text-gray-500">讓我們一起減輕你的腦負荷</div>
       </div>
 
@@ -362,7 +362,7 @@ const EaseMindWireframes = () => {
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       <div className="max-w-6xl mx-auto">
-        <h1 className="text-2xl font-bold mb-2">EaseMind Low-Fi Wireframes</h1>
+        <h1 className="text-2xl font-bold mb-2">Laxie Low-Fi Wireframes</h1>
         <p className="text-gray-600 mb-6">點擊畫面中的按鈕可以體驗完整流程</p>
 
         {/* Navigation */}
@@ -421,4 +421,4 @@ const EaseMindWireframes = () => {
   );
 };
 
-export default EaseMindWireframes;
+export default LaxieWireframes;
