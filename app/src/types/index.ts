@@ -1,31 +1,33 @@
-import { Timestamp } from 'firebase/firestore';
-
 export interface User {
   id: string;
   email: string;
   displayName: string;
   role: 'primary' | 'secondary';
   familyId: string;
-  settings: {
-    defaultPickupPerson: 'me' | 'partner' | 'grandparent';
-    notificationPreferences: {
-      pushEnabled: boolean;
-      quietHoursStart: string;
-      quietHoursEnd: string;
-    };
+  settings: UserSettings;
+  calendarConnections: CalendarConnections;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface UserSettings {
+  defaultPickupPerson: 'me' | 'partner' | 'grandparent';
+  notificationPreferences: {
+    pushEnabled: boolean;
+    quietHoursStart: string;
+    quietHoursEnd: string;
   };
-  calendarConnections: {
-    google?: {
-      accessToken: string;
-      refreshToken: string;
-      calendarId: string;
-    };
-    apple?: {
-      syncEnabled: boolean;
-    };
+}
+
+export interface CalendarConnections {
+  google?: {
+    accessToken: string;
+    refreshToken: string;
+    calendarId: string;
   };
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  apple?: {
+    syncEnabled: boolean;
+  };
 }
 
 export interface Event {
@@ -36,15 +38,15 @@ export interface Event {
   externalId?: string;
   title: string;
   description?: string;
-  startTime: Timestamp;
-  endTime: Timestamp;
+  startTime: Date;
+  endTime: Date;
   location?: string;
   category: 'work' | 'pickup' | 'school' | 'personal' | 'other';
   assignedTo?: string;
   isRecurring: boolean;
   recurrenceRule?: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface InventoryItem {
@@ -56,12 +58,12 @@ export interface InventoryItem {
   currentQuantity: number;
   averageConsumptionPerDay: number;
   estimatedDaysRemaining: number;
-  lastPurchaseDate: Timestamp;
+  lastPurchaseDate: Date;
   lastPurchaseQuantity: number;
   lowStockThreshold: number;
   isDefault: boolean;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface Alert {
@@ -72,16 +74,17 @@ export interface Alert {
   status: 'pending' | 'in_progress' | 'resolved' | 'dismissed';
   title: string;
   description: string;
-  triggerTime: Timestamp;
-  expiryTime: Timestamp;
+  triggerTime: Date;
+  expiryTime: Date;
   relatedEventIds?: string[];
   relatedInventoryIds?: string[];
+  relatedEvents?: Event[];
   suggestedSolutions: Solution[];
   selectedSolutionId?: string;
-  resolvedAt?: Timestamp;
+  resolvedAt?: Date;
   resolvedBy?: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface Solution {
@@ -98,3 +101,10 @@ export interface SolutionAction {
   type: 'update_event' | 'add_shopping_item' | 'send_notification';
   payload: Record<string, unknown>;
 }
+
+export type RootStackParamList = {
+  Home: undefined;
+  AlertDetail: { alertId: string };
+  Solutions: { alertId: string };
+  Confirm: { alertId: string; solutionId: string };
+};
