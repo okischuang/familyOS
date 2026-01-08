@@ -30,7 +30,6 @@ export default function RootNavigator() {
           component={HomeScreen}
           options={{
             title: 'Laxie',
-            headerLargeTitle: true,
           }}
         />
         <Stack.Screen
