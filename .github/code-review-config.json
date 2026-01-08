@@ -1,0 +1,43 @@
+{
+  "enabled": true,
+  "model": "gpt-4o-mini",
+  "maxTokens": 4096,
+  "temperature": 0.3,
+  "skipPaths": [
+    "node_modules",
+    "*.lock",
+    "*.min.*",
+    "dist",
+    "build",
+    ".next"
+  ],
+  "skipFileTypes": [
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".ico",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".map"
+  ],
+  "reviewFocus": [
+    "bugs",
+    "security",
+    "performance",
+    "best-practices",
+    "typescript"
+  ],
+  "labels": {
+    "approved": "ai-approved",
+    "changes-requested": "ai-review-needed"
+  },
+  "triggerOn": {
+    "opened": true,
+    "synchronize": true,
+    "reopened": true
+  }
+}
