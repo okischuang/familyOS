@@ -13,7 +13,7 @@ import OpenAI from 'openai';
 import { getFirestore } from 'firebase-admin/firestore';
 import type { Risk, Resolution, FamilyRules, MessageTone, Language } from '../types/index.js';
 
-const db = getFirestore();
+const db = () => getFirestore();
 
 // ============================================
 // OpenAI Client
@@ -252,21 +252,21 @@ function formatTime(date: Date, language: Language): string {
 export async function generateAndUpdateResolutionMessage(
   resolutionId: string
 ): Promise<string> {
-  const resolutionDoc = await db.collection('resolutions').doc(resolutionId).get();
+  const resolutionDoc = await db().collection('resolutions').doc(resolutionId).get();
   if (!resolutionDoc.exists) {
     throw new Error(`Resolution ${resolutionId} not found`);
   }
 
   const resolution = resolutionDoc.data() as Resolution;
 
-  const riskDoc = await db.collection('risks').doc(resolution.riskId).get();
+  const riskDoc = await db().collection('risks').doc(resolution.riskId).get();
   if (!riskDoc.exists) {
     throw new Error(`Risk ${resolution.riskId} not found`);
   }
 
   const risk = riskDoc.data() as Risk;
 
-  const rulesDoc = await db.collection('familyRules').doc(resolution.familyId).get();
+  const rulesDoc = await db().collection('familyRules').doc(resolution.familyId).get();
   if (!rulesDoc.exists) {
     throw new Error(`Family rules for ${resolution.familyId} not found`);
   }
@@ -277,7 +277,7 @@ export async function generateAndUpdateResolutionMessage(
   const generated = await generateMessage({ risk, resolution, rules });
 
   // Update resolution with generated message
-  await db.collection('resolutions').doc(resolutionId).update({
+  await db().collection('resolutions').doc(resolutionId).update({
     message: generated.message,
   });
 

@@ -14,7 +14,7 @@ import type {
   L4CheckResult,
 } from '../types/index.js';
 
-const db = getFirestore();
+const db = () => getFirestore();
 
 // ============================================
 // Resolution Configuration
@@ -81,10 +81,10 @@ export async function createResolutionForRisk(
   };
 
   // Save resolution
-  await db.collection('resolutions').doc(resolution.id).set(resolution);
+  await db().collection('resolutions').doc(resolution.id).set(resolution);
 
   // Update risk status
-  await db.collection('risks').doc(risk.id).update({
+  await db().collection('risks').doc(risk.id).update({
     status: 'resolving',
   });
 
@@ -160,7 +160,7 @@ function checkL4Eligibility(
 // ============================================
 
 export async function executeResolution(resolutionId: string): Promise<boolean> {
-  const resolutionRef = db.collection('resolutions').doc(resolutionId);
+  const resolutionRef = db().collection('resolutions').doc(resolutionId);
   const doc = await resolutionRef.get();
 
   if (!doc.exists) {
@@ -193,7 +193,7 @@ export async function executeResolution(resolutionId: string): Promise<boolean> 
   });
 
   // Update risk status
-  await db.collection('risks').doc(resolution.riskId).update({
+  await db().collection('risks').doc(resolution.riskId).update({
     status: 'resolved',
   });
 
@@ -214,7 +214,7 @@ export async function vetoResolution(
   resolutionId: string,
   reason?: string
 ): Promise<boolean> {
-  const resolutionRef = db.collection('resolutions').doc(resolutionId);
+  const resolutionRef = db().collection('resolutions').doc(resolutionId);
   const doc = await resolutionRef.get();
 
   if (!doc.exists) {
@@ -243,7 +243,7 @@ export async function vetoResolution(
   });
 
   // Update risk back to pending
-  await db.collection('risks').doc(resolution.riskId).update({
+  await db().collection('risks').doc(resolution.riskId).update({
     status: 'pending',
   });
 
@@ -264,7 +264,7 @@ async function logAction(
   resolution: Resolution,
   outcome: 'executed' | 'vetoed'
 ): Promise<void> {
-  const risk = await db.collection('risks').doc(resolution.riskId).get();
+  const risk = await db().collection('risks').doc(resolution.riskId).get();
   const riskData = risk.data() as Risk;
 
   const actionLog = {
@@ -281,7 +281,7 @@ async function logAction(
     timestamp: Timestamp.now(),
   };
 
-  await db.collection('actionLogs').doc(actionLog.id).set(actionLog);
+  await db().collection('actionLogs').doc(actionLog.id).set(actionLog);
 }
 
 // ============================================
@@ -289,7 +289,7 @@ async function logAction(
 // ============================================
 
 async function getTrustMetrics(userId: string): Promise<TrustMetrics | null> {
-  const doc = await db.collection('trustMetrics').doc(userId).get();
+  const doc = await db().collection('trustMetrics').doc(userId).get();
   if (!doc.exists) {
     return null;
   }
@@ -301,11 +301,11 @@ async function updateTrustMetrics(
   wasVetoed: boolean
 ): Promise<void> {
   // Get user ID from family (simplified - in real app, would track per-user)
-  const familyDoc = await db.collection('familyRules').doc(resolution.familyId).get();
+  const familyDoc = await db().collection('familyRules').doc(resolution.familyId).get();
   if (!familyDoc.exists) return;
 
   const userId = resolution.familyId; // Simplified: use familyId as userId for MVP
-  const metricsRef = db.collection('trustMetrics').doc(userId);
+  const metricsRef = db().collection('trustMetrics').doc(userId);
   const doc = await metricsRef.get();
 
   if (!doc.exists) {
@@ -375,7 +375,7 @@ async function updateTrustMetrics(
 export async function getScheduledResolutions(
   familyId: string
 ): Promise<Resolution[]> {
-  const snapshot = await db
+  const snapshot = await db()
     .collection('resolutions')
     .where('familyId', '==', familyId)
     .where('status', '==', 'scheduled')
@@ -386,7 +386,7 @@ export async function getScheduledResolutions(
 }
 
 export async function getResolutionsForRisk(riskId: string): Promise<Resolution[]> {
-  const snapshot = await db
+  const snapshot = await db()
     .collection('resolutions')
     .where('riskId', '==', riskId)
     .get();
@@ -399,7 +399,7 @@ export async function getResolutionsForRisk(riskId: string): Promise<Resolution[
 // ============================================
 
 async function getFamilyRules(familyId: string): Promise<FamilyRules | null> {
-  const doc = await db.collection('familyRules').doc(familyId).get();
+  const doc = await db().collection('familyRules').doc(familyId).get();
   if (!doc.exists) {
     return null;
   }

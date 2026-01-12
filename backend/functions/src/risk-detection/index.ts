@@ -7,7 +7,7 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import type { Risk, RiskType, RiskSeverity, CalendarEvent, FamilyRules } from '../types/index.js';
 import { getFamilyEvents } from '../calendar/index.js';
 
-const db = getFirestore();
+const db = () => getFirestore();
 
 // ============================================
 // Risk Detection Configuration
@@ -38,7 +38,7 @@ export async function runRiskDetection(): Promise<DetectionResult> {
   };
 
   // Get all families with active rules
-  const familiesSnapshot = await db.collection('familyRules').get();
+  const familiesSnapshot = await db().collection('familyRules').get();
 
   for (const doc of familiesSnapshot.docs) {
     const rules = doc.data() as FamilyRules;
@@ -301,7 +301,7 @@ function generateRiskId(
 type SaveResult = 'created' | 'updated' | 'skipped';
 
 async function saveRisk(risk: Risk): Promise<SaveResult> {
-  const riskRef = db.collection('risks').doc(risk.id);
+  const riskRef = db().collection('risks').doc(risk.id);
   const existing = await riskRef.get();
 
   if (existing.exists) {
@@ -331,7 +331,7 @@ async function saveRisk(risk: Risk): Promise<SaveResult> {
 // ============================================
 
 export async function getPendingRisks(familyId: string): Promise<Risk[]> {
-  const snapshot = await db
+  const snapshot = await db()
     .collection('risks')
     .where('familyId', '==', familyId)
     .where('status', '==', 'pending')
@@ -342,7 +342,7 @@ export async function getPendingRisks(familyId: string): Promise<Risk[]> {
 }
 
 export async function getHighSeverityRisks(familyId: string): Promise<Risk[]> {
-  const snapshot = await db
+  const snapshot = await db()
     .collection('risks')
     .where('familyId', '==', familyId)
     .where('status', '==', 'pending')
@@ -357,7 +357,7 @@ export async function updateRiskStatus(
   riskId: string,
   status: Risk['status']
 ): Promise<void> {
-  await db.collection('risks').doc(riskId).update({
+  await db().collection('risks').doc(riskId).update({
     status,
     updatedAt: Timestamp.now(),
   });

@@ -7,7 +7,7 @@ import { google, calendar_v3 } from 'googleapis';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import type { CalendarEvent, User } from '../types/index.js';
 
-const db = getFirestore();
+const db = () => getFirestore();
 
 // ============================================
 // OAuth Client Setup
@@ -38,7 +38,7 @@ export async function refreshAccessToken(user: User): Promise<string> {
   const { credentials } = await oauth2Client.refreshAccessToken();
 
   // Update user's access token in Firestore
-  await db.collection('users').doc(user.id).update({
+  await db().collection('users').doc(user.id).update({
     'googleCalendar.accessToken': credentials.access_token,
     'googleCalendar.tokenExpiry': Timestamp.fromMillis(credentials.expiry_date || Date.now() + 3600000),
   });
@@ -137,12 +137,12 @@ export async function syncEventsToFirestore(
   userId: string,
   events: CalendarEvent[]
 ): Promise<{ added: number; updated: number }> {
-  const batch = db.batch();
+  const batch = db().batch();
   let added = 0;
   let updated = 0;
 
   for (const event of events) {
-    const eventRef = db.collection('events').doc(event.id);
+    const eventRef = db().collection('events').doc(event.id);
     const existing = await eventRef.get();
 
     if (existing.exists) {
@@ -171,7 +171,7 @@ export async function getFamilyEvents(
   startTime: Date,
   endTime: Date
 ): Promise<CalendarEvent[]> {
-  const snapshot = await db
+  const snapshot = await db()
     .collection('events')
     .where('familyId', '==', familyId)
     .where('startTime', '>=', Timestamp.fromDate(startTime))
