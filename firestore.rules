@@ -1,0 +1,45 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users collection
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Family rules collection
+    match /familyRules/{familyId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Events collection
+    match /events/{eventId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only backend can write
+    }
+
+    // Risks collection
+    match /risks/{riskId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only backend can write
+    }
+
+    // Resolutions collection
+    match /resolutions/{resolutionId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only backend can write
+    }
+
+    // Action logs collection
+    match /actionLogs/{logId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only backend can write
+    }
+
+    // Trust metrics collection
+    match /trustMetrics/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false; // Only backend can write
+    }
+  }
+}
