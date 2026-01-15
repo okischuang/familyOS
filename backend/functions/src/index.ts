@@ -133,7 +133,10 @@ export const scheduledResolutionExecution = onSchedule(
  * When a new risk is detected, automatically create a resolution
  */
 export const onRiskCreated = onDocumentCreated(
-  'risks/{riskId}',
+  {
+    document: 'risks/{riskId}',
+    secrets: ['OPENAI_API_KEY'],
+  },
   async (event) => {
     const riskData = event.data?.data() as Risk | undefined;
     if (!riskData) return;
@@ -283,5 +286,136 @@ export const triggerRiskDetection = onRequest(
     console.log('Manual risk detection triggered');
     const result = await runRiskDetection();
     res.json(result);
+  }
+);
+
+/**
+ * Seed Test Data (for development only)
+ */
+export const seedTestData = onRequest(
+  { cors: true },
+  async (req, res) => {
+    console.log('Seeding test data...');
+
+    const now = new Date();
+    const familyId = 'test-family-001';
+    const userId = 'test-user-001';
+
+    // 1. Create Family Rules
+    await db.collection('familyRules').doc(familyId).set({
+      familyId,
+      defaultPickupPerson: 'user',
+      partnerName: '老婆',
+      tone: 'warm',
+      language: 'zh-TW',
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    // 2. Create User
+    await db.collection('users').doc(userId).set({
+      id: userId,
+      email: 'test@example.com',
+      displayName: 'Test User',
+      familyId,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    // 3. Create Calendar Events with pickup conflicts
+    const pickupTime = new Date(now);
+    pickupTime.setHours(17, 0, 0, 0);
+
+    const meetingStart = new Date(pickupTime);
+    meetingStart.setMinutes(meetingStart.getMinutes() - 30);
+
+    const meetingEnd = new Date(pickupTime);
+    meetingEnd.setHours(18, 0, 0, 0);
+
+    // Event 1: Today - conflicts with pickup
+    await db.collection('events').doc('event-001').set({
+      id: 'event-001',
+      externalId: 'google_123',
+      familyId,
+      userId,
+      source: 'google',
+      title: '重要客戶會議',
+      description: 'Q1 業績檢討會議',
+      startTime: Timestamp.fromDate(meetingStart),
+      endTime: Timestamp.fromDate(meetingEnd),
+      location: '台北辦公室',
+      isBusy: true,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    // Event 2: Tomorrow - conflicts with pickup
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(16, 30, 0, 0);
+
+    const tomorrowEnd = new Date(tomorrow);
+    tomorrowEnd.setHours(18, 30, 0, 0);
+
+    await db.collection('events').doc('event-002').set({
+      id: 'event-002',
+      externalId: 'google_456',
+      familyId,
+      userId,
+      source: 'google',
+      title: '產品發布會',
+      description: '新產品上線發布會',
+      startTime: Timestamp.fromDate(tomorrow),
+      endTime: Timestamp.fromDate(tomorrowEnd),
+      location: '公司大廳',
+      isBusy: true,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    // 4. Create Trust Metrics
+    await db.collection('trustMetrics').doc(userId).set({
+      userId,
+      familyId,
+      totalActions: 12,
+      executedActions: 11,
+      vetoedActions: 1,
+      successRate: 0.917,
+      recentVetoCount: 1,
+      currentAutonomyLevel: 'L3',
+      l4Eligible: true,
+      lastUpdated: Timestamp.now(),
+    });
+
+    res.json({
+      success: true,
+      message: 'Test data seeded',
+      data: {
+        familyId,
+        userId,
+        eventsCreated: 2,
+        expectedConflicts: 2,
+      },
+    });
+  }
+);
+
+/**
+ * Delete risks (for testing)
+ */
+export const deleteRisks = onRequest(
+  { cors: true },
+  async (req, res) => {
+    const snapshot = await db.collection('risks').get();
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+
+    const resSnapshot = await db.collection('resolutions').get();
+    const resBatch = db.batch();
+    resSnapshot.docs.forEach((doc) => resBatch.delete(doc.ref));
+    await resBatch.commit();
+
+    res.json({ deleted: snapshot.size, resolutionsDeleted: resSnapshot.size });
   }
 );

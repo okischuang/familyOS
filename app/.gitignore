@@ -33,7 +33,6 @@ yarn-error.*
 *.pem
 
 # Local Expo config
-expo-env.d.ts
 
 # TypeScript
 *.tsbuildinfo
