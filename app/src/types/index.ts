@@ -103,6 +103,7 @@ export interface SolutionAction {
 }
 
 export type RootStackParamList = {
+  Main: undefined;
   Home: undefined;
   AlertDetail: { alertId: string };
   Solutions: { alertId: string };
