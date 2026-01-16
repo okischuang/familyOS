@@ -309,6 +309,71 @@ export async function generateAndUpdateResolutionMessage(
 }
 
 // ============================================
+// Apology Message Generation (for Rollback)
+// ============================================
+
+export interface ApologyMessageInput {
+  originalMessage: string;
+  recipientName: string;
+  rules: FamilyRules;
+}
+
+export async function generateApologyMessage(
+  input: ApologyMessageInput
+): Promise<string> {
+  const { originalMessage, recipientName, rules } = input;
+
+  const openai = getOpenAIClient();
+
+  const systemPrompt = rules.language === 'zh-TW'
+    ? `你是一個家庭協調系統的訊息生成器。
+你的任務是生成一則道歉訊息，因為之前的訊息是系統誤判。
+
+重要規則：
+1. 語氣要真誠、友善
+2. 訊息要簡短（1-2句話）
+3. 承認是系統的錯誤，不是收件人的問題
+4. 直接開始訊息內容，不要加入前綴
+
+語言：繁體中文`
+    : `You are a message generator for a family coordination system.
+Your task is to generate an apology message because the previous message was a system error.
+
+Important rules:
+1. Be sincere and friendly
+2. Keep it short (1-2 sentences)
+3. Acknowledge it was the system's mistake, not the recipient's fault
+4. Start with message content directly, no prefixes
+
+Language: English`;
+
+  const userPrompt = rules.language === 'zh-TW'
+    ? `之前發送的訊息：「${originalMessage}」
+
+這則訊息是誤發的，需要向${recipientName}道歉並說明不用理會之前的訊息。
+請生成一則簡短的道歉訊息。`
+    : `Previous message sent: "${originalMessage}"
+
+This message was sent by mistake. Need to apologize to ${recipientName} and explain to ignore the previous message.
+Generate a short apology message.`;
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.7,
+    max_tokens: 150,
+  });
+
+  return response.choices[0]?.message?.content?.trim() ||
+    (rules.language === 'zh-TW'
+      ? '抱歉，剛才的訊息請忽略，是系統誤發的。'
+      : 'Sorry, please ignore the previous message. It was sent by mistake.');
+}
+
+// ============================================
 // Audit Log Explanation
 // ============================================
 

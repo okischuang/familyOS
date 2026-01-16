@@ -56,7 +56,7 @@ export interface ActionLog {
   why: string;
   message: string;
   autonomyLevel: 'L2' | 'L3' | 'L4';
-  outcome: 'executed' | 'vetoed' | 'failed';
+  outcome: 'executed' | 'vetoed' | 'failed' | 'rolled_back';
   wasVetoed: boolean;
   timestamp: { _seconds: number };
 }
@@ -100,6 +100,21 @@ export async function vetoResolution(
     { resolutionId: string; reason?: string },
     { success: boolean; message: string }
   >(functions, 'vetoScheduledResolution');
+  const result = await callable({ resolutionId, reason });
+  return result.data;
+}
+
+/**
+ * Rollback an executed resolution (send apology)
+ */
+export async function rollbackResolution(
+  resolutionId: string,
+  reason?: string
+): Promise<{ success: boolean; message: string; apologyMessage?: string }> {
+  const callable = httpsCallable<
+    { resolutionId: string; reason?: string },
+    { success: boolean; message: string; apologyMessage?: string }
+  >(functions, 'rollbackExecutedResolution');
   const result = await callable({ resolutionId, reason });
   return result.data;
 }

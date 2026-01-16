@@ -19,6 +19,7 @@ import {
   createResolutionForRisk,
   executeResolution,
   vetoResolution,
+  rollbackResolution,
   getScheduledResolutions,
 } from './resolution/index.js';
 import { generateAndUpdateResolutionMessage } from './language-actuator/index.js';
@@ -206,6 +207,32 @@ export const vetoScheduledResolution = onCall(
     } catch (error) {
       console.error('Error vetoing resolution:', error);
       throw new HttpsError('internal', 'Failed to veto resolution');
+    }
+  }
+);
+
+/**
+ * Rollback an executed resolution (send apology)
+ */
+export const rollbackExecutedResolution = onCall(
+  { enforceAppCheck: false },
+  async (request) => {
+    const { resolutionId, reason } = request.data;
+
+    if (!resolutionId) {
+      throw new HttpsError('invalid-argument', 'resolutionId is required');
+    }
+
+    try {
+      const result = await rollbackResolution(resolutionId, reason);
+      return {
+        success: result.success,
+        message: result.success ? 'Resolution rolled back' : result.error,
+        apologyMessage: result.apologyMessage,
+      };
+    } catch (error) {
+      console.error('Error rolling back resolution:', error);
+      throw new HttpsError('internal', 'Failed to rollback resolution');
     }
   }
 );
@@ -698,6 +725,50 @@ export const triggerExecution = onRequest(
       executed,
       results,
     });
+  }
+);
+
+/**
+ * Test Helper: Force execute a resolution (bypasses veto window)
+ */
+export const forceExecuteResolution = onRequest(
+  { cors: true },
+  async (req, res) => {
+    const { resolutionId } = req.query;
+    if (!resolutionId) {
+      res.status(400).json({ error: 'resolutionId required' });
+      return;
+    }
+
+    try {
+      const resolutionRef = db.collection('resolutions').doc(resolutionId as string);
+      const doc = await resolutionRef.get();
+
+      if (!doc.exists) {
+        res.status(404).json({ error: 'Resolution not found' });
+        return;
+      }
+
+      // Update vetoDeadline to past to allow execution
+      await resolutionRef.update({
+        vetoDeadline: Timestamp.fromMillis(Date.now() - 60000), // 1 minute ago
+        scheduledAt: Timestamp.fromMillis(Date.now() - 1000), // just now
+      });
+
+      // Execute the resolution
+      const success = await executeResolution(resolutionId as string);
+
+      res.json({
+        success,
+        resolutionId,
+        message: success ? 'Resolution force executed' : 'Execution failed',
+      });
+    } catch (error) {
+      console.error('Error force executing resolution:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
   }
 );
 

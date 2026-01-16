@@ -13,10 +13,12 @@ import {
   RefreshControl,
   ActivityIndicator,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   getActionLogs,
+  rollbackResolution,
   ActionLog,
   timestampToDate,
   formatRelativeTime,
@@ -25,11 +27,15 @@ import {
 // Test family ID - in production, get from user context
 const TEST_FAMILY_ID = 'test-family-001';
 
+// Rollback window: 30 minutes
+const ROLLBACK_WINDOW_MS = 30 * 60 * 1000;
+
 export default function AuditScreen() {
   const [logs, setLogs] = useState<ActionLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rollingBackId, setRollingBackId] = useState<string | null>(null);
 
   const fetchLogs = useCallback(async () => {
     try {
@@ -54,16 +60,72 @@ export default function AuditScreen() {
     fetchLogs();
   }, [fetchLogs]);
 
+  const handleRollback = useCallback(async (log: ActionLog) => {
+    Alert.alert(
+      '確認撤回',
+      `確定要撤回這個行動並向對方道歉嗎？\n\n原訊息："${log.message}"`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '撤回並道歉',
+          style: 'destructive',
+          onPress: async () => {
+            setRollingBackId(log.resolutionId);
+            try {
+              const result = await rollbackResolution(log.resolutionId, '用戶主動撤回');
+              if (result.success) {
+                Alert.alert(
+                  '已撤回',
+                  `已發送道歉訊息：\n\n"${result.apologyMessage}"`,
+                  [{ text: '好', onPress: () => fetchLogs() }]
+                );
+              } else {
+                Alert.alert('無法撤回', result.message);
+              }
+            } catch (err) {
+              console.error('Error rolling back:', err);
+              Alert.alert('錯誤', '無法撤回行動，請重試');
+            } finally {
+              setRollingBackId(null);
+            }
+          },
+        },
+      ]
+    );
+  }, [fetchLogs]);
+
+  const canRollback = (log: ActionLog): boolean => {
+    // Can only rollback executed (not vetoed) actions within the rollback window
+    if (log.wasVetoed) return false;
+    if (log.outcome !== 'executed') return false;
+
+    const timestamp = timestampToDate(log.timestamp);
+    const elapsed = Date.now() - timestamp.getTime();
+    return elapsed < ROLLBACK_WINDOW_MS;
+  };
+
   const renderLogItem = ({ item }: { item: ActionLog }) => {
     const timestamp = timestampToDate(item.timestamp);
     const isVetoed = item.wasVetoed;
+    const isRolledBack = item.outcome === 'rolled_back';
+    const showRollback = canRollback(item);
+    const isRollingBack = rollingBackId === item.resolutionId;
 
     return (
-      <View style={[styles.logCard, isVetoed && styles.logCardVetoed]}>
+      <View style={[
+        styles.logCard,
+        isVetoed && styles.logCardVetoed,
+        isRolledBack && styles.logCardRolledBack,
+      ]}>
         {/* Status Badge */}
-        <View style={[styles.badge, isVetoed ? styles.badgeVetoed : styles.badgeExecuted]}>
+        <View style={[
+          styles.badge,
+          isVetoed ? styles.badgeVetoed :
+          isRolledBack ? styles.badgeRolledBack :
+          styles.badgeExecuted
+        ]}>
           <Text style={styles.badgeText}>
-            {isVetoed ? '已阻止' : '已執行'}
+            {isVetoed ? '已阻止' : isRolledBack ? '已撤回' : '已執行'}
           </Text>
         </View>
 
@@ -91,6 +153,21 @@ export default function AuditScreen() {
           </View>
           <Text style={styles.timeText}>{formatRelativeTime(timestamp)}</Text>
         </View>
+
+        {/* Rollback Button (only for executed actions within window) */}
+        {showRollback && (
+          <TouchableOpacity
+            style={[styles.rollbackButton, isRollingBack && styles.rollbackButtonDisabled]}
+            onPress={() => handleRollback(item)}
+            disabled={isRollingBack}
+          >
+            {isRollingBack ? (
+              <ActivityIndicator size="small" color="#9ca3af" />
+            ) : (
+              <Text style={styles.rollbackButtonText}>↩️ 撤回並道歉</Text>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
@@ -228,6 +305,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#fef2f2',
     borderColor: '#fecaca',
   },
+  logCardRolledBack: {
+    backgroundColor: '#fefce8',
+    borderColor: '#fde047',
+  },
   badge: {
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
@@ -240,6 +321,9 @@ const styles = StyleSheet.create({
   },
   badgeVetoed: {
     backgroundColor: '#fee2e2',
+  },
+  badgeRolledBack: {
+    backgroundColor: '#fef08a',
   },
   badgeText: {
     fontSize: 12,
@@ -323,5 +407,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
+  },
+  rollbackButton: {
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    backgroundColor: '#f9fafb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  rollbackButtonDisabled: {
+    backgroundColor: '#e5e7eb',
+  },
+  rollbackButtonText: {
+    fontSize: 14,
+    color: '#4b5563',
+    fontWeight: '500',
   },
 });

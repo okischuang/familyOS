@@ -296,6 +296,190 @@ export async function vetoResolution(
 }
 
 // ============================================
+// Rollback Handling (for executed resolutions)
+// ============================================
+
+export interface RollbackResult {
+  success: boolean;
+  apologyMessage?: string;
+  error?: string;
+}
+
+export async function rollbackResolution(
+  resolutionId: string,
+  reason?: string
+): Promise<RollbackResult> {
+  const resolutionRef = db().collection('resolutions').doc(resolutionId);
+  const doc = await resolutionRef.get();
+
+  if (!doc.exists) {
+    return { success: false, error: `Resolution ${resolutionId} not found` };
+  }
+
+  const resolution = doc.data() as Resolution;
+
+  // Can only rollback executed resolutions
+  if (resolution.status !== 'executed') {
+    return {
+      success: false,
+      error: `Cannot rollback: resolution is ${resolution.status}, not executed`,
+    };
+  }
+
+  // Check rollback window (e.g., within 30 minutes of execution)
+  const executedAt = resolution.executedAt;
+  if (executedAt) {
+    const rollbackWindowMs = 30 * 60 * 1000; // 30 minutes
+    const now = Date.now();
+    const executedTime = executedAt.toMillis();
+    if (now - executedTime > rollbackWindowMs) {
+      return {
+        success: false,
+        error: 'Rollback window expired (30 minutes)',
+      };
+    }
+  }
+
+  // Get family rules for apology message generation
+  const rulesDoc = await db().collection('familyRules').doc(resolution.familyId).get();
+  const rules = rulesDoc.exists ? rulesDoc.data() as FamilyRules : null;
+
+  // Generate apology message
+  let apologyMessage: string;
+  try {
+    // Dynamic import to avoid circular dependency
+    const { generateApologyMessage } = await import('../language-actuator/index.js');
+    apologyMessage = await generateApologyMessage({
+      originalMessage: resolution.message,
+      recipientName: resolution.recipient,
+      rules: rules || {
+        familyId: resolution.familyId,
+        defaultPickupPerson: 'user',
+        partnerName: resolution.recipient,
+        tone: 'warm',
+        language: 'zh-TW',
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      },
+    });
+  } catch (error) {
+    console.error('Error generating apology message:', error);
+    apologyMessage = '抱歉，剛才的訊息請忽略，是系統誤發的。';
+  }
+
+  // Send apology push notification
+  const pushResult = await sendPushToUser(resolution.recipient, {
+    title: 'Laxie 更正',
+    body: apologyMessage,
+    data: {
+      type: 'resolution_rollback',
+      resolutionId: resolution.id,
+      originalMessage: resolution.message,
+    },
+  });
+
+  if (!pushResult.success) {
+    console.warn(`Apology push failed: ${pushResult.error}`);
+    // Continue anyway - the rollback intent is recorded
+  }
+
+  // Update resolution status
+  await resolutionRef.update({
+    status: 'rolled_back',
+    rolledBackAt: Timestamp.now(),
+    rollbackReason: reason || 'User requested rollback',
+    apologyMessage,
+    apologyPushResult: {
+      success: pushResult.success,
+      messageId: pushResult.messageId || null,
+      error: pushResult.error || null,
+    },
+  });
+
+  // Update risk status back to pending
+  await db().collection('risks').doc(resolution.riskId).update({
+    status: 'pending',
+  });
+
+  // Log the rollback action
+  await logRollbackAction(resolution, apologyMessage);
+
+  // Update trust metrics (rollback counts as a correction)
+  await updateTrustMetricsForRollback(resolution);
+
+  return {
+    success: true,
+    apologyMessage,
+  };
+}
+
+async function logRollbackAction(
+  resolution: Resolution,
+  apologyMessage: string
+): Promise<void> {
+  const risk = await db().collection('risks').doc(resolution.riskId).get();
+  const riskData = risk.data() as Risk;
+
+  const actionLog = {
+    id: `log_rollback_${resolution.id}_${Date.now()}`,
+    familyId: resolution.familyId,
+    riskId: resolution.riskId,
+    resolutionId: resolution.id,
+    what: `Rolled back and apologized to ${resolution.recipient}`,
+    why: `Original message was incorrect: ${riskData?.context?.description || 'Unknown'}`,
+    message: apologyMessage,
+    originalMessage: resolution.message,
+    autonomyLevel: resolution.autonomyLevel,
+    outcome: 'rolled_back',
+    wasVetoed: false,
+    wasRolledBack: true,
+    timestamp: Timestamp.now(),
+  };
+
+  await db().collection('actionLogs').doc(actionLog.id).set(actionLog);
+}
+
+async function updateTrustMetricsForRollback(resolution: Resolution): Promise<void> {
+  const userId = resolution.familyId; // Simplified: use familyId as userId for MVP
+  const metricsRef = db().collection('trustMetrics').doc(userId);
+  const doc = await metricsRef.get();
+
+  if (!doc.exists) return;
+
+  const metrics = doc.data() as TrustMetrics;
+
+  // Rollback counts as a correction - increases recent veto count slightly
+  // but not as much as a veto (since user caught the mistake)
+  metrics.recentVetoCount = Math.min(metrics.recentVetoCount + 0.5, 10);
+
+  // Add rollback tracking
+  const metricsData = metrics as unknown as Record<string, unknown>;
+  const rollbackCount = (metricsData.rollbackCount as number) || 0;
+
+  // Recalculate L4 eligibility
+  metrics.l4Eligible = metrics.successRate >= 0.9 && metrics.recentVetoCount < 2;
+
+  // Update current autonomy level
+  if (metrics.l4Eligible) {
+    metrics.currentAutonomyLevel = 'L4';
+  } else if (metrics.successRate >= 0.7) {
+    metrics.currentAutonomyLevel = 'L3';
+  } else {
+    metrics.currentAutonomyLevel = 'L2';
+  }
+
+  metrics.lastUpdated = Timestamp.now();
+
+  await metricsRef.update({
+    recentVetoCount: metrics.recentVetoCount,
+    currentAutonomyLevel: metrics.currentAutonomyLevel,
+    l4Eligible: metrics.l4Eligible,
+    lastUpdated: metrics.lastUpdated,
+    rollbackCount: rollbackCount + 1,
+  });
+}
+
+// ============================================
 // Action Logging
 // ============================================
 
