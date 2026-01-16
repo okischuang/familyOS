@@ -11,25 +11,42 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.laxie.app"
+      "bundleIdentifier": "com.laxie.app",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.laxie.app"
+      "package": "com.laxie.app",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#4285f4"
+        }
+      ]
+    ],
     "extra": {
       "eas": {
-        "projectId": "your-project-id"
+        "projectId": "9eeb1ba1-5ef6-4431-b0e0-b3874dd5fa00"
       }
-    }
+    },
+    "owner": "okischuang"
   }
 }

@@ -29,6 +29,7 @@ import {
   exchangeCodeForTokens,
   disconnectCalendar,
 } from './calendar/index.js';
+import { registerFcmToken, sendPushToUser } from './notifications/index.js';
 import type { Risk, User } from './types/index.js';
 
 // Initialize Firebase Admin
@@ -458,6 +459,57 @@ export const syncUserCalendar = onCall(
       if (error instanceof HttpsError) throw error;
       throw new HttpsError('internal', 'Failed to sync calendar');
     }
+  }
+);
+
+// ============================================
+// Push Notifications
+// ============================================
+
+/**
+ * Register FCM token for push notifications
+ */
+export const registerPushToken = onCall(
+  { enforceAppCheck: false },
+  async (request) => {
+    const { userId, fcmToken } = request.data;
+
+    if (!userId || !fcmToken) {
+      throw new HttpsError('invalid-argument', 'userId and fcmToken are required');
+    }
+
+    try {
+      await registerFcmToken(userId, fcmToken);
+      return { success: true };
+    } catch (error) {
+      console.error('Error registering FCM token:', error);
+      throw new HttpsError('internal', 'Failed to register push token');
+    }
+  }
+);
+
+/**
+ * Test push notification (for development)
+ */
+export const testPushNotification = onRequest(
+  { cors: true },
+  async (req, res) => {
+    const { userId, message } = req.query;
+
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+
+    const result = await sendPushToUser(userId as string, {
+      title: 'Laxie 測試通知',
+      body: (message as string) || '這是一則測試通知',
+      data: {
+        type: 'test',
+      },
+    });
+
+    res.json(result);
   }
 );
 

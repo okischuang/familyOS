@@ -13,6 +13,7 @@ import type {
   FamilyRules,
   L4CheckResult,
 } from '../types/index.js';
+import { sendPushToUser } from '../notifications/index.js';
 
 const db = () => getFirestore();
 
@@ -193,14 +194,41 @@ export async function executeResolution(resolutionId: string): Promise<boolean> 
     return false;
   }
 
-  // Execute the action (send message)
-  // In a real implementation, this would call the notification service
-  console.log(`Executing resolution ${resolutionId}: Sending message to ${resolution.recipient}`);
+  // Execute the action (send push notification)
+  console.log(`Executing resolution ${resolutionId}: Sending push to ${resolution.recipient}`);
 
-  // Update resolution status
+  // Get the risk for context
+  const riskDoc = await db().collection('risks').doc(resolution.riskId).get();
+  const risk = riskDoc.data() as Risk;
+
+  // Send push notification
+  const pushResult = await sendPushToUser(resolution.recipient, {
+    title: 'Laxie 接送提醒',
+    body: resolution.message,
+    data: {
+      type: 'resolution_executed',
+      resolutionId: resolution.id,
+      riskId: resolution.riskId,
+      riskType: risk?.type || 'unknown',
+    },
+  });
+
+  if (!pushResult.success) {
+    console.warn(`Push notification failed: ${pushResult.error}`);
+    // Continue execution even if push fails - log it for audit
+  }
+
+  // Update resolution status (filter out undefined values for Firestore)
+  const pushResultData: Record<string, unknown> = {
+    success: pushResult.success,
+  };
+  if (pushResult.messageId) pushResultData.messageId = pushResult.messageId;
+  if (pushResult.error) pushResultData.error = pushResult.error;
+
   await resolutionRef.update({
     status: 'executed',
     executedAt: Timestamp.now(),
+    pushResult: pushResultData,
   });
 
   // Update risk status
