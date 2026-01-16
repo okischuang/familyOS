@@ -152,6 +152,18 @@ function buildChinesePrompt(
     }
   }
 
+  if (risk.type === 'pickup_handoff') {
+    // Handoff: one person is busy, notify the available person to pick up
+    return `生成一則給${isToPartner ? partnerName : '用戶'}的訊息。
+
+情況：
+- 今天 ${occurringTime} 需要接小孩
+- 另一半因為「${risk.context.description.replace('需要通知接送：有人因「', '').replace('」無法接送，需通知其他家人', '')}」無法接送
+- 需要通知對方今天要負責接送
+
+請生成一則簡短、友善的通知訊息，讓對方知道今天需要由他/她去接小孩。`;
+  }
+
   if (risk.type === 'schedule_overlap') {
     return `生成一則訊息。
 
@@ -202,6 +214,18 @@ Situation:
 
 Generate a short reminder message.`;
     }
+  }
+
+  if (risk.type === 'pickup_handoff') {
+    // Handoff: one person is busy, notify the available person to pick up
+    return `Generate a message to ${isToPartner ? partnerName : 'the user'}.
+
+Situation:
+- Child needs to be picked up at ${occurringTime} today
+- Partner is busy due to: ${risk.context.description}
+- Need to notify the available person to handle pickup
+
+Generate a short, friendly notification message letting them know they need to pick up today.`;
   }
 
   if (risk.type === 'schedule_overlap') {
