@@ -78,8 +78,8 @@ async function detectRisksForFamily(
 
   const events = await getFamilyEvents(familyId, now, futureDate);
 
-  // Detect pickup conflicts
-  const pickupRisks = detectPickupConflicts(familyId, events, rules);
+  // Detect pickup conflicts (checks if ALL family members are busy)
+  const pickupRisks = await detectPickupConflicts(familyId, events, rules);
 
   // Detect schedule overlaps
   const overlapRisks = detectScheduleOverlaps(familyId, events);
@@ -103,12 +103,20 @@ async function detectRisksForFamily(
 // Pickup Conflict Detection
 // ============================================
 
-function detectPickupConflicts(
+async function detectPickupConflicts(
   familyId: string,
   events: CalendarEvent[],
   rules: FamilyRules
-): Risk[] {
+): Promise<Risk[]> {
   const risks: Risk[] = [];
+
+  // Get all family members
+  const familyMembers = await db()
+    .collection('users')
+    .where('familyId', '==', familyId)
+    .get();
+
+  const memberIds = familyMembers.docs.map((doc) => doc.id);
 
   // Get unique dates from events
   const eventDates = getUniqueDates(events);
@@ -122,23 +130,38 @@ function detectPickupConflicts(
     const pickupStart = new Date(pickupTime.getTime() - PICKUP_BUFFER_MINUTES * 60 * 1000);
     const pickupEnd = new Date(pickupTime.getTime() + PICKUP_BUFFER_MINUTES * 60 * 1000);
 
-    // Find events that conflict with pickup time
-    const conflictingEvents = events.filter((event) => {
-      const eventStart = event.startTime.toDate();
-      const eventEnd = event.endTime.toDate();
+    // Check each family member's availability during pickup time
+    const memberAvailability: Map<string, { busy: boolean; events: CalendarEvent[] }> = new Map();
 
-      // Event is on the same day and overlaps with pickup window
-      return (
-        isSameDay(eventStart, date) &&
-        event.isBusy &&
-        eventStart < pickupEnd &&
-        eventEnd > pickupStart
-      );
-    });
+    for (const memberId of memberIds) {
+      const memberEvents = events.filter((event) => {
+        const eventStart = event.startTime.toDate();
+        const eventEnd = event.endTime.toDate();
 
-    if (conflictingEvents.length > 0) {
-      // For MVP, we assume all events in the calendar belong to the primary user
-      const severity = determineSeverity(conflictingEvents, pickupTime);
+        // Event belongs to this member, is on the same day, and overlaps with pickup window
+        return (
+          event.userId === memberId &&
+          isSameDay(eventStart, date) &&
+          event.isBusy &&
+          eventStart < pickupEnd &&
+          eventEnd > pickupStart
+        );
+      });
+
+      memberAvailability.set(memberId, {
+        busy: memberEvents.length > 0,
+        events: memberEvents,
+      });
+    }
+
+    // Count how many members are busy vs available
+    const busyMembers = Array.from(memberAvailability.entries()).filter(([, data]) => data.busy);
+    const availableMembers = Array.from(memberAvailability.entries()).filter(([, data]) => !data.busy);
+
+    // Only create risk if ALL family members are busy (no one can pick up)
+    if (memberIds.length > 0 && busyMembers.length === memberIds.length) {
+      const allConflictingEvents = busyMembers.flatMap(([, data]) => data.events);
+      const severity = determineSeverity(allConflictingEvents, pickupTime);
 
       const risk: Risk = {
         id: generateRiskId(familyId, 'pickup_conflict', pickupTime),
@@ -148,8 +171,8 @@ function detectPickupConflicts(
         detectedAt: Timestamp.now(),
         occurringAt: Timestamp.fromDate(pickupTime),
         context: {
-          events: conflictingEvents.map((e) => e.id),
-          description: buildPickupConflictDescription(conflictingEvents, rules),
+          events: allConflictingEvents.map((e) => e.id),
+          description: buildMultiUserPickupConflictDescription(busyMembers, rules),
         },
         status: 'pending',
         createdAt: Timestamp.now(),
@@ -157,9 +180,61 @@ function detectPickupConflicts(
 
       risks.push(risk);
     }
+    // If some members are busy but others are available, create a HANDOFF risk
+    // This notifies the available person that they need to pick up
+    else if (busyMembers.length > 0 && availableMembers.length > 0) {
+      const busyMemberEvents = busyMembers.flatMap(([, data]) => data.events);
+      const busyMemberIds = busyMembers.map(([id]) => id);
+      const availableMemberIds = availableMembers.map(([id]) => id);
+
+      const risk: Risk = {
+        id: generateRiskId(familyId, 'pickup_handoff', pickupTime),
+        familyId,
+        type: 'pickup_handoff',
+        severity: 'low', // Handoffs are lower severity than conflicts
+        detectedAt: Timestamp.now(),
+        occurringAt: Timestamp.fromDate(pickupTime),
+        context: {
+          events: busyMemberEvents.map((e) => e.id),
+          description: buildHandoffDescription(busyMembers, availableMemberIds, rules),
+          busyMembers: busyMemberIds,
+          availableMembers: availableMemberIds,
+        } as Risk['context'] & { busyMembers: string[]; availableMembers: string[] },
+        status: 'pending',
+        createdAt: Timestamp.now(),
+      };
+
+      risks.push(risk);
+      console.log(`Pickup handoff on ${date.toISOString().split('T')[0]}: notifying available member(s)`);
+    }
   }
 
   return risks;
+}
+
+function buildMultiUserPickupConflictDescription(
+  busyMembers: [string, { busy: boolean; events: CalendarEvent[] }][],
+  rules: FamilyRules
+): string {
+  const descriptions = busyMembers.map(([memberId, data]) => {
+    const eventTitles = data.events.map((e) => e.title).join(', ');
+    return `${eventTitles}`;
+  });
+
+  return `雙方都有事無法接送：${descriptions.join(' / ')}`;
+}
+
+function buildHandoffDescription(
+  busyMembers: [string, { busy: boolean; events: CalendarEvent[] }][],
+  availableMemberIds: string[],
+  rules: FamilyRules
+): string {
+  const busyEventTitles = busyMembers
+    .flatMap(([, data]) => data.events)
+    .map((e) => e.title)
+    .join(', ');
+
+  return `需要通知接送：有人因「${busyEventTitles}」無法接送，需通知其他家人`;
 }
 
 // ============================================
@@ -257,16 +332,6 @@ function determineSeverity(
   }
 
   return 'low';
-}
-
-function buildPickupConflictDescription(
-  events: CalendarEvent[],
-  rules: FamilyRules
-): string {
-  const eventTitles = events.map((e) => e.title).join(', ');
-  const defaultPerson = rules.defaultPickupPerson === 'user' ? 'You' : rules.partnerName;
-
-  return `${defaultPerson} may not be available for pickup due to: ${eventTitles}`;
 }
 
 function eventsOverlap(event1: CalendarEvent, event2: CalendarEvent): boolean {

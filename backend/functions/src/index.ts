@@ -22,7 +22,13 @@ import {
   getScheduledResolutions,
 } from './resolution/index.js';
 import { generateAndUpdateResolutionMessage } from './language-actuator/index.js';
-import { fetchCalendarEvents, syncEventsToFirestore } from './calendar/index.js';
+import {
+  fetchCalendarEvents,
+  syncEventsToFirestore,
+  getAuthorizationUrl,
+  exchangeCodeForTokens,
+  disconnectCalendar,
+} from './calendar/index.js';
 import type { Risk, User } from './types/index.js';
 
 // Initialize Firebase Admin
@@ -277,6 +283,185 @@ export const getActionLogs = onCall(
 );
 
 // ============================================
+// Google Calendar OAuth
+// ============================================
+
+/**
+ * Get Google Calendar authorization URL
+ */
+export const getCalendarAuthUrl = onCall(
+  {
+    enforceAppCheck: false,
+    secrets: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+  },
+  async (request) => {
+    const { userId, redirectUri } = request.data;
+
+    if (!userId) {
+      throw new HttpsError('invalid-argument', 'userId is required');
+    }
+
+    if (!redirectUri) {
+      throw new HttpsError('invalid-argument', 'redirectUri is required');
+    }
+
+    try {
+      const url = getAuthorizationUrl(userId, redirectUri);
+      return { url };
+    } catch (error) {
+      console.error('Error generating auth URL:', error);
+      throw new HttpsError('internal', 'Failed to generate authorization URL');
+    }
+  }
+);
+
+/**
+ * Handle Google OAuth callback - exchange code for tokens
+ */
+export const handleCalendarOAuthCallback = onRequest(
+  {
+    cors: true,
+    secrets: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+  },
+  async (req, res) => {
+    const { code, state: userId, error: oauthError } = req.query;
+
+    // Handle OAuth errors
+    if (oauthError) {
+      console.error('OAuth error:', oauthError);
+      res.redirect(`laxie://calendar-connected?error=${oauthError}`);
+      return;
+    }
+
+    if (!code || !userId) {
+      res.status(400).json({ error: 'Missing code or state parameter' });
+      return;
+    }
+
+    // Determine redirect URI (same as what was used to generate auth URL)
+    const redirectUri = `https://us-central1-laxie-family-os-f7077.cloudfunctions.net/handleCalendarOAuthCallback`;
+
+    const result = await exchangeCodeForTokens(
+      code as string,
+      userId as string,
+      redirectUri
+    );
+
+    if (result.success) {
+      // Show success page (works on both web and mobile)
+      res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calendar Connected - Laxie</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 40px 20px; text-align: center; background: #f0f9f0; }
+    h1 { color: #2e7d32; }
+    p { color: #666; }
+    .checkmark { font-size: 64px; }
+  </style>
+</head>
+<body>
+  <div class="checkmark">✅</div>
+  <h1>Google 日曆已連接！</h1>
+  <p>User: ${userId}</p>
+  <p>您可以關閉此頁面</p>
+</body>
+</html>
+      `);
+    } else {
+      // Show error page
+      res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Error - Laxie</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 40px 20px; text-align: center; background: #fff0f0; }
+    h1 { color: #c62828; }
+    p { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>連接失敗</h1>
+  <p>${result.error || 'Unknown error'}</p>
+</body>
+</html>
+      `);
+    }
+  }
+);
+
+/**
+ * Disconnect Google Calendar
+ */
+export const disconnectGoogleCalendar = onCall(
+  { enforceAppCheck: false },
+  async (request) => {
+    const { userId } = request.data;
+
+    if (!userId) {
+      throw new HttpsError('invalid-argument', 'userId is required');
+    }
+
+    try {
+      await disconnectCalendar(userId);
+      return { success: true };
+    } catch (error) {
+      console.error('Error disconnecting calendar:', error);
+      throw new HttpsError('internal', 'Failed to disconnect calendar');
+    }
+  }
+);
+
+/**
+ * Manually sync calendar for a user
+ */
+export const syncUserCalendar = onCall(
+  {
+    enforceAppCheck: false,
+    secrets: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+  },
+  async (request) => {
+    const { userId } = request.data;
+
+    if (!userId) {
+      throw new HttpsError('invalid-argument', 'userId is required');
+    }
+
+    try {
+      const userDoc = await db.collection('users').doc(userId).get();
+      if (!userDoc.exists) {
+        throw new HttpsError('not-found', 'User not found');
+      }
+
+      const user = { id: userDoc.id, ...userDoc.data() } as User;
+
+      if (!user.googleCalendar?.refreshToken) {
+        throw new HttpsError('failed-precondition', 'Google Calendar not connected');
+      }
+
+      const events = await fetchCalendarEvents(user);
+      const result = await syncEventsToFirestore(user.id, events);
+
+      return {
+        success: true,
+        eventsFound: events.length,
+        ...result,
+      };
+    } catch (error) {
+      console.error('Error syncing calendar:', error);
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError('internal', 'Failed to sync calendar');
+    }
+  }
+);
+
+// ============================================
 // Manual Trigger (for testing)
 // ============================================
 
@@ -417,5 +602,202 @@ export const deleteRisks = onRequest(
     await resBatch.commit();
 
     res.json({ deleted: snapshot.size, resolutionsDeleted: resSnapshot.size });
+  }
+);
+
+/**
+ * Manual trigger for resolution execution (for testing)
+ * Executes all scheduled resolutions that are past their scheduled time
+ */
+export const triggerExecution = onRequest(
+  { cors: true },
+  async (req, res) => {
+    console.log('Manual execution triggered');
+    const now = Timestamp.now();
+
+    // Find resolutions ready for execution
+    const snapshot = await db
+      .collection('resolutions')
+      .where('status', '==', 'scheduled')
+      .where('scheduledAt', '<=', now)
+      .get();
+
+    console.log(`Found ${snapshot.size} resolutions ready for execution`);
+
+    const results: { id: string; success: boolean; error?: string }[] = [];
+
+    for (const doc of snapshot.docs) {
+      try {
+        const success = await executeResolution(doc.id);
+        results.push({ id: doc.id, success });
+      } catch (error) {
+        console.error(`Error executing resolution ${doc.id}:`, error);
+        results.push({
+          id: doc.id,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
+
+    const executed = results.filter((r) => r.success).length;
+    res.json({
+      found: snapshot.size,
+      executed,
+      results,
+    });
+  }
+);
+
+/**
+ * Debug: List family events and members
+ */
+export const debugFamily = onRequest(
+  { cors: true },
+  async (req, res) => {
+    const { familyId } = req.query;
+    if (!familyId) {
+      res.status(400).json({ error: 'familyId required' });
+      return;
+    }
+
+    // Get family members
+    const members = await db.collection('users')
+      .where('familyId', '==', familyId)
+      .get();
+
+    // Get events
+    const events = await db.collection('events')
+      .where('familyId', '==', familyId)
+      .orderBy('startTime')
+      .get();
+
+    // Get risks
+    const risks = await db.collection('risks')
+      .where('familyId', '==', familyId)
+      .get();
+
+    res.json({
+      members: members.docs.map(d => ({ id: d.id, ...d.data() })),
+      events: events.docs.map(d => {
+        const data = d.data();
+        return {
+          id: data.id,
+          userId: data.userId,
+          title: data.title,
+          startTime: data.startTime?.toDate?.().toISOString(),
+          endTime: data.endTime?.toDate?.().toISOString(),
+          isBusy: data.isBusy,
+        };
+      }),
+      risks: risks.docs.map(d => ({ id: d.id, ...d.data() })),
+    });
+  }
+);
+
+/**
+ * Add a family member (for testing multi-user scenarios)
+ */
+export const addFamilyMember = onRequest(
+  { cors: true },
+  async (req, res) => {
+    const { userId, familyId, displayName, email } = req.query;
+
+    if (!userId || !familyId) {
+      res.status(400).json({ error: 'userId and familyId are required' });
+      return;
+    }
+
+    await db.collection('users').doc(userId as string).set({
+      id: userId,
+      email: email || `${userId}@example.com`,
+      displayName: displayName || userId,
+      familyId,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    res.json({
+      success: true,
+      message: `User ${userId} added to family ${familyId}`,
+      user: {
+        id: userId,
+        displayName: displayName || userId,
+        familyId,
+      },
+    });
+  }
+);
+
+/**
+ * Get OAuth URL for calendar connection (HTTP endpoint for testing)
+ */
+export const getCalendarOAuthUrl = onRequest(
+  {
+    cors: true,
+    secrets: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+  },
+  async (req, res) => {
+    const { userId } = req.query;
+
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+
+    const redirectUri = `https://us-central1-laxie-family-os-f7077.cloudfunctions.net/handleCalendarOAuthCallback`;
+    const url = getAuthorizationUrl(userId as string, redirectUri);
+
+    res.json({
+      url,
+      instructions: 'Open this URL in browser to connect Google Calendar',
+    });
+  }
+);
+
+/**
+ * Simple page to connect Google Calendar (Safari-friendly)
+ */
+export const connectCalendar = onRequest(
+  {
+    cors: true,
+    secrets: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+  },
+  async (req, res) => {
+    const { userId } = req.query;
+
+    if (!userId) {
+      res.status(400).send('Missing userId parameter. Use: ?userId=your-user-id');
+      return;
+    }
+
+    const redirectUri = `https://us-central1-laxie-family-os-f7077.cloudfunctions.net/handleCalendarOAuthCallback`;
+    const url = getAuthorizationUrl(userId as string, redirectUri);
+
+    // Return HTML page with a button (Safari-friendly)
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect Google Calendar - Laxie</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 40px 20px; text-align: center; background: #f5f5f5; }
+    h1 { color: #333; margin-bottom: 20px; }
+    p { color: #666; margin-bottom: 30px; }
+    .btn { display: inline-block; padding: 16px 32px; background: #4285f4; color: white; text-decoration: none; border-radius: 8px; font-size: 18px; }
+    .btn:hover { background: #3367d6; }
+    .user { color: #888; font-size: 14px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>連接 Google 日曆</h1>
+  <p>點擊下方按鈕連接您的 Google 日曆</p>
+  <a class="btn" href="${url}">連接 Google Calendar</a>
+  <p class="user">User: ${userId}</p>
+</body>
+</html>
+    `);
   }
 );

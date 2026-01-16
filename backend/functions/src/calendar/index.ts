@@ -13,12 +13,107 @@ const db = () => getFirestore();
 // OAuth Client Setup
 // ============================================
 
-function getOAuth2Client() {
+function getOAuth2Client(redirectUri?: string) {
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI
+    redirectUri || process.env.GOOGLE_REDIRECT_URI
   );
+}
+
+// ============================================
+// OAuth Flow
+// ============================================
+
+const SCOPES = [
+  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/calendar.events.readonly',
+];
+
+/**
+ * Generate authorization URL for Google OAuth
+ */
+export function getAuthorizationUrl(userId: string, redirectUri: string): string {
+  const oauth2Client = getOAuth2Client(redirectUri);
+
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: SCOPES,
+    prompt: 'consent', // Force consent to get refresh token
+    state: userId, // Pass userId to callback
+  });
+
+  return url;
+}
+
+/**
+ * Exchange authorization code for tokens
+ */
+export async function exchangeCodeForTokens(
+  code: string,
+  userId: string,
+  redirectUri: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const oauth2Client = getOAuth2Client(redirectUri);
+    const { tokens } = await oauth2Client.getToken(code);
+
+    if (!tokens.refresh_token) {
+      return { success: false, error: 'No refresh token received. Please revoke access and try again.' };
+    }
+
+    // Get user's primary calendar ID
+    oauth2Client.setCredentials(tokens);
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+    const calendarList = await calendar.calendarList.get({ calendarId: 'primary' });
+
+    // Store tokens in Firestore
+    await db().collection('users').doc(userId).update({
+      'googleCalendar.accessToken': tokens.access_token,
+      'googleCalendar.refreshToken': tokens.refresh_token,
+      'googleCalendar.tokenExpiry': Timestamp.fromMillis(tokens.expiry_date || Date.now() + 3600000),
+      'googleCalendar.calendarId': calendarList.data.id || 'primary',
+      'googleCalendar.connectedAt': Timestamp.now(),
+    });
+
+    console.log(`Google Calendar connected for user ${userId}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Error exchanging code for tokens:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Disconnect Google Calendar
+ */
+export async function disconnectCalendar(userId: string): Promise<void> {
+  const userRef = db().collection('users').doc(userId);
+  const user = await userRef.get();
+
+  if (user.exists && user.data()?.googleCalendar?.accessToken) {
+    // Revoke the token
+    try {
+      const oauth2Client = getOAuth2Client();
+      oauth2Client.setCredentials({
+        access_token: user.data()?.googleCalendar.accessToken,
+      });
+      await oauth2Client.revokeCredentials();
+    } catch (error) {
+      console.error('Error revoking token:', error);
+      // Continue anyway - token might already be invalid
+    }
+  }
+
+  // Remove calendar data from user
+  await userRef.update({
+    googleCalendar: null,
+  });
+
+  console.log(`Google Calendar disconnected for user ${userId}`);
 }
 
 // ============================================
@@ -111,22 +206,26 @@ function transformGoogleEvent(
   const startTime = event.start?.dateTime || event.start?.date;
   const endTime = event.end?.dateTime || event.end?.date;
 
-  return {
+  // Build event object, excluding undefined values (Firestore doesn't accept undefined)
+  const calendarEvent: CalendarEvent = {
     id: `google_${event.id}`,
-    externalId: event.id || undefined,
     familyId: user.familyId,
     userId: user.id,
     source: 'google',
     title: event.summary || 'Untitled Event',
-    description: event.description || undefined,
     startTime: Timestamp.fromDate(new Date(startTime!)),
     endTime: Timestamp.fromDate(new Date(endTime!)),
-    location: event.location || undefined,
-    // Busy if not explicitly marked as free
     isBusy: event.transparency !== 'transparent',
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   };
+
+  // Only add optional fields if they have values
+  if (event.id) calendarEvent.externalId = event.id;
+  if (event.description) calendarEvent.description = event.description;
+  if (event.location) calendarEvent.location = event.location;
+
+  return calendarEvent;
 }
 
 // ============================================

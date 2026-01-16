@@ -9,7 +9,7 @@ import { Timestamp } from 'firebase-admin/firestore';
 // Risk Types
 // ============================================
 
-export type RiskType = 'pickup_conflict' | 'deadline_miss' | 'schedule_overlap';
+export type RiskType = 'pickup_conflict' | 'pickup_handoff' | 'deadline_miss' | 'schedule_overlap';
 export type RiskSeverity = 'high' | 'low';
 export type RiskStatus = 'pending' | 'resolving' | 'resolved' | 'expired';
 
@@ -198,6 +198,6 @@ export interface L4CheckResult {
 export const L4_CONDITIONS = {
   MIN_SUCCESS_RATE: 0.9,          // 90%
   MAX_RECENT_VETOS: 2,            // Last 10 actions
-  ALLOWED_TYPES: ['pickup_conflict', 'schedule_overlap'] as RiskType[],
+  ALLOWED_TYPES: ['pickup_conflict', 'pickup_handoff', 'schedule_overlap'] as RiskType[],
   // No third parties (school, grandparents) - checked in context
 } as const;
