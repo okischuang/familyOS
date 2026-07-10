@@ -100,9 +100,15 @@ export interface ActionLog {
 // Trust Metrics Types
 // ============================================
 
+// A task category groups risk types that should earn trust together. Trust is
+// tracked PER category so one agent's bad week doesn't demote the others
+// (Autonomy Governor, migration Step 3).
+export type TaskCategory = 'pickup' | 'schedule' | 'subscription' | 'other';
+
 export interface TrustMetrics {
-  userId: string;
+  userId: string;                 // metrics doc id (familyId_taskCategory)
   familyId: string;
+  taskCategory?: TaskCategory;    // which category these metrics track
 
   // Counts
   totalActions: number;

@@ -8,12 +8,11 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import type {
   Risk,
   Resolution,
-  TrustMetrics,
   AutonomyLevel,
   FamilyRules,
-  L4CheckResult,
 } from '../types/index.js';
 import { sendPushToUser } from '../notifications/index.js';
+import { decideAutonomyLevel, recordOutcome } from '../autonomy-governor/index.js';
 
 const db = () => getFirestore();
 
@@ -38,8 +37,7 @@ export interface CreateResolutionResult {
 }
 
 export async function createResolutionForRisk(
-  risk: Risk,
-  userId: string
+  risk: Risk
 ): Promise<CreateResolutionResult> {
   // Get family rules
   const rules = await getFamilyRules(risk.familyId);
@@ -47,9 +45,8 @@ export async function createResolutionForRisk(
     throw new Error(`No family rules found for family ${risk.familyId}`);
   }
 
-  // Get trust metrics to determine autonomy level
-  const trustMetrics = await getTrustMetrics(userId);
-  const autonomyLevel = determineAutonomyLevel(risk, trustMetrics);
+  // Autonomy Governor decides how much autonomy this risk's category has earned
+  const autonomyLevel = await decideAutonomyLevel(risk);
 
   // Calculate timing
   const delayMinutes = DELAY_CONFIG[autonomyLevel];
@@ -110,66 +107,10 @@ export async function createResolutionForRisk(
 // ============================================
 // Autonomy Level Determination
 // ============================================
-
-function determineAutonomyLevel(
-  risk: Risk,
-  trustMetrics: TrustMetrics | null
-): AutonomyLevel {
-  // No trust history = start at L2
-  if (!trustMetrics) {
-    return 'L2';
-  }
-
-  // Check L4 eligibility
-  const l4Check = checkL4Eligibility(risk, trustMetrics);
-  if (l4Check.eligible) {
-    return 'L4';
-  }
-
-  // Check L3 eligibility (lower bar than L4)
-  if (trustMetrics.successRate >= 0.7 && trustMetrics.recentVetoCount <= 3) {
-    return 'L3';
-  }
-
-  // Default to L2
-  return 'L2';
-}
-
-function checkL4Eligibility(
-  risk: Risk,
-  trustMetrics: TrustMetrics
-): L4CheckResult {
-  const reasons: string[] = [];
-  let eligible = true;
-
-  // Check success rate
-  if (trustMetrics.successRate < 0.9) {
-    eligible = false;
-    reasons.push(`Success rate ${(trustMetrics.successRate * 100).toFixed(0)}% < 90%`);
-  }
-
-  // Check recent vetos
-  if (trustMetrics.recentVetoCount >= 2) {
-    eligible = false;
-    reasons.push(`Recent vetos ${trustMetrics.recentVetoCount} >= 2`);
-  }
-
-  // Check risk type is allowed for L4
-  const allowedTypes = ['pickup_conflict', 'pickup_handoff', 'schedule_overlap'];
-  if (!allowedTypes.includes(risk.type)) {
-    eligible = false;
-    reasons.push(`Risk type "${risk.type}" not allowed for L4`);
-  }
-
-  // Note: Third-party involvement check would go here
-  // For MVP, we assume no third parties
-
-  if (eligible) {
-    reasons.push('All L4 conditions met');
-  }
-
-  return { eligible, reasons };
-}
+//
+// Moved to the Autonomy Governor Agent (../autonomy-governor). Resolution now
+// delegates "how much autonomy" (decideAutonomyLevel) and outcome feedback
+// (recordOutcome) to the governor, keeping this module focused on planning.
 
 // ============================================
 // Resolution Execution
@@ -245,8 +186,10 @@ export async function executeResolution(resolutionId: string): Promise<boolean> 
   // Log the action
   await logAction(resolution, 'executed');
 
-  // Update trust metrics
-  await updateTrustMetrics(resolution, false);
+  // Autonomy Governor records the outcome against this category's ladder
+  if (risk) {
+    await recordOutcome(resolution, risk, false);
+  }
 
   return true;
 }
@@ -295,8 +238,11 @@ export async function vetoResolution(
   // Log the action
   await logAction(resolution, 'vetoed');
 
-  // Update trust metrics (count as veto)
-  await updateTrustMetrics(resolution, true);
+  // Autonomy Governor records the veto against this category's ladder
+  const riskDoc = await db().collection('risks').doc(resolution.riskId).get();
+  if (riskDoc.exists) {
+    await recordOutcome(resolution, riskDoc.data() as Risk, true);
+  }
 
   return true;
 }
@@ -329,89 +275,8 @@ async function logAction(
   await db().collection('actionLogs').doc(actionLog.id).set(actionLog);
 }
 
-// ============================================
-// Trust Metrics
-// ============================================
-
-async function getTrustMetrics(userId: string): Promise<TrustMetrics | null> {
-  const doc = await db().collection('trustMetrics').doc(userId).get();
-  if (!doc.exists) {
-    return null;
-  }
-  return doc.data() as TrustMetrics;
-}
-
-async function updateTrustMetrics(
-  resolution: Resolution,
-  wasVetoed: boolean
-): Promise<void> {
-  // Get user ID from family (simplified - in real app, would track per-user)
-  const familyDoc = await db().collection('familyRules').doc(resolution.familyId).get();
-  if (!familyDoc.exists) return;
-
-  const userId = resolution.familyId; // Simplified: use familyId as userId for MVP
-  const metricsRef = db().collection('trustMetrics').doc(userId);
-  const doc = await metricsRef.get();
-
-  if (!doc.exists) {
-    // Create initial metrics
-    const newMetrics: TrustMetrics = {
-      userId,
-      familyId: resolution.familyId,
-      totalActions: 1,
-      executedActions: wasVetoed ? 0 : 1,
-      vetoedActions: wasVetoed ? 1 : 0,
-      successRate: wasVetoed ? 0 : 1,
-      recentVetoCount: wasVetoed ? 1 : 0,
-      currentAutonomyLevel: 'L2',
-      l4Eligible: false,
-      lastUpdated: Timestamp.now(),
-    };
-    await metricsRef.set(newMetrics);
-    return;
-  }
-
-  const metrics = doc.data() as TrustMetrics;
-
-  // Update counts
-  metrics.totalActions++;
-  if (wasVetoed) {
-    metrics.vetoedActions++;
-    metrics.recentVetoCount = Math.min(metrics.recentVetoCount + 1, 10);
-  } else {
-    metrics.executedActions++;
-    // Decay recent veto count on success
-    metrics.recentVetoCount = Math.max(0, metrics.recentVetoCount - 0.5);
-  }
-
-  // Recalculate success rate
-  metrics.successRate = metrics.executedActions / metrics.totalActions;
-
-  // Update L4 eligibility
-  metrics.l4Eligible = metrics.successRate >= 0.9 && metrics.recentVetoCount < 2;
-
-  // Update current autonomy level
-  if (metrics.l4Eligible) {
-    metrics.currentAutonomyLevel = 'L4';
-  } else if (metrics.successRate >= 0.7) {
-    metrics.currentAutonomyLevel = 'L3';
-  } else {
-    metrics.currentAutonomyLevel = 'L2';
-  }
-
-  metrics.lastUpdated = Timestamp.now();
-
-  await metricsRef.update({
-    totalActions: metrics.totalActions,
-    executedActions: metrics.executedActions,
-    vetoedActions: metrics.vetoedActions,
-    successRate: metrics.successRate,
-    recentVetoCount: metrics.recentVetoCount,
-    currentAutonomyLevel: metrics.currentAutonomyLevel,
-    l4Eligible: metrics.l4Eligible,
-    lastUpdated: metrics.lastUpdated,
-  });
-}
+// Trust metrics now live in the Autonomy Governor Agent
+// (../autonomy-governor) — the single owner of the L0-L4 ladder.
 
 // ============================================
 // Query Functions
