@@ -30,7 +30,8 @@ import {
   disconnectCalendar,
 } from './calendar/index.js';
 import { registerFcmToken, sendPushToUser } from './notifications/index.js';
-import type { Risk, User } from './types/index.js';
+import { runSubscriptionDetection } from './subscription-detection/index.js';
+import type { Risk, Subscription, User } from './types/index.js';
 
 // Initialize Firebase Admin
 initializeApp();
@@ -128,6 +129,26 @@ export const scheduledResolutionExecution = onSchedule(
     if (executed > 0) {
       console.log(`Resolution execution complete: ${executed} executed`);
     }
+  }
+);
+
+/**
+ * Subscription Waste Detection Scheduler
+ * Runs daily to detect idle subscriptions about to auto-renew, emitting
+ * subscription_waste risks that flow through the same resolution pipeline.
+ */
+export const scheduledSubscriptionDetection = onSchedule(
+  {
+    schedule: 'every day 09:00',
+    timeZone: 'Asia/Taipei',
+    retryCount: 3,
+  },
+  async () => {
+    console.log('Starting scheduled subscription detection...');
+    const result = await runSubscriptionDetection();
+    console.log(
+      `Subscription detection complete: ${result.risksCreated} created, ${result.risksUpdated} updated, ${result.familiesProcessed} families processed`
+    );
   }
 );
 
@@ -523,6 +544,105 @@ export const triggerRiskDetection = onRequest(
     console.log('Manual risk detection triggered');
     const result = await runRiskDetection();
     res.json(result);
+  }
+);
+
+/**
+ * Manual trigger for subscription-waste detection (for testing)
+ */
+export const triggerSubscriptionDetection = onRequest(
+  { cors: true },
+  async (req, res) => {
+    console.log('Manual subscription detection triggered');
+    const result = await runSubscriptionDetection();
+    res.json(result);
+  }
+);
+
+/**
+ * Seed Test Subscriptions (for development only)
+ * Mirrors the app's mock set: two clearly-wasteful subs about to renew (should
+ * each produce a subscription_waste risk) and one active sub (should be skipped).
+ */
+export const seedTestSubscriptions = onRequest(
+  { cors: true },
+  async (req, res) => {
+    const familyId = 'test-family-001';
+    const now = Date.now();
+    const daysAgo = (n: number) => Timestamp.fromDate(new Date(now - n * 24 * 60 * 60 * 1000));
+    const daysAhead = (n: number) => Timestamp.fromDate(new Date(now + n * 24 * 60 * 60 * 1000));
+
+    const subs: Subscription[] = [
+      {
+        id: 'sub-disney',
+        familyId,
+        name: 'Disney+',
+        category: 'streaming',
+        icon: '🏰',
+        amount: 270,
+        currency: 'TWD',
+        billingCycle: 'monthly',
+        nextRenewalDate: daysAhead(6),
+        startedDate: daysAgo(210),
+        lastUsedDate: daysAgo(74),
+        usagePerMonth: 0,
+        autoRenew: true,
+        detectedFrom: 'app_store',
+        status: 'unused',
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      },
+      {
+        id: 'sub-chatgpt',
+        familyId,
+        name: 'ChatGPT Plus',
+        category: 'productivity',
+        icon: '🤖',
+        amount: 640,
+        currency: 'TWD',
+        billingCycle: 'monthly',
+        nextRenewalDate: daysAhead(1),
+        startedDate: daysAgo(60),
+        usagePerMonth: 0,
+        autoRenew: true,
+        detectedFrom: 'bank',
+        status: 'unused',
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      },
+      {
+        id: 'sub-netflix',
+        familyId,
+        name: 'Netflix 高級方案',
+        category: 'streaming',
+        icon: '🎬',
+        amount: 390,
+        currency: 'TWD',
+        billingCycle: 'monthly',
+        nextRenewalDate: daysAhead(4),
+        startedDate: daysAgo(430),
+        lastUsedDate: daysAgo(1),
+        usagePerMonth: 22,
+        autoRenew: true,
+        detectedFrom: 'bank',
+        sharedWith: ['you', 'partner'],
+        status: 'active',
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      },
+    ];
+
+    for (const sub of subs) {
+      await db.collection('subscriptions').doc(sub.id).set(sub);
+    }
+
+    res.json({
+      success: true,
+      message: 'Test subscriptions seeded',
+      familyId,
+      seeded: subs.length,
+      expectedRisks: 2, // Disney+ and ChatGPT (Netflix is active -> skipped)
+    });
   }
 );
 

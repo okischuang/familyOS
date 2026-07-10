@@ -174,6 +174,17 @@ function buildChinesePrompt(
 請生成一則簡短的提醒訊息。`;
   }
 
+  if (risk.type === 'subscription_waste') {
+    return `生成一則給用戶的訊息。
+
+情況：
+- 系統偵測到一項閒置訂閱即將自動續訂、白白扣款
+- 詳情：${risk.context.description}
+- 用戶可以選擇取消以停止浪費
+
+請生成一則簡短、直接的提醒訊息，點出是哪個服務、閒置多久、即將扣多少，並暗示可考慮取消。不要幫用戶做決定。`;
+  }
+
   // Generic fallback
   return `生成一則訊息。
 
@@ -236,6 +247,19 @@ Situation:
 - Details: ${risk.context.description}
 
 Generate a short reminder message.`;
+  }
+
+  if (risk.type === 'subscription_waste') {
+    return `Generate a message to the user.
+
+Situation:
+- System detected an idle subscription about to auto-renew and waste money
+- Details: ${risk.context.description}
+- The user can cancel it to stop the waste
+
+Generate a short, direct reminder naming the service, how long it has been idle,
+and how much is about to be charged, hinting that cancelling is an option. Do not
+make the decision for the user.`;
   }
 
   // Generic fallback

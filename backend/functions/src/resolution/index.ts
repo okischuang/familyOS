@@ -62,6 +62,10 @@ export async function createResolutionForRisk(
     // For handoff, notify the available member(s)
     const context = risk.context as { availableMembers?: string[] };
     recipient = context.availableMembers?.[0] || rules.partnerName;
+  } else if (risk.type === 'subscription_waste') {
+    // Subscription waste is a household-money decision — surface it to the
+    // primary user, who decides whether to cancel.
+    recipient = 'user';
   } else {
     // For other risks, use default rules
     recipient = rules.defaultPickupPerson === 'user' ? rules.partnerName : 'user';
@@ -201,9 +205,11 @@ export async function executeResolution(resolutionId: string): Promise<boolean> 
   const riskDoc = await db().collection('risks').doc(resolution.riskId).get();
   const risk = riskDoc.data() as Risk;
 
-  // Send push notification
+  // Send push notification (title reflects the risk domain)
+  const pushTitle =
+    risk?.type === 'subscription_waste' ? 'Laxie 訂閱提醒' : 'Laxie 接送提醒';
   const pushResult = await sendPushToUser(resolution.recipient, {
-    title: 'Laxie 接送提醒',
+    title: pushTitle,
     body: resolution.message,
     data: {
       type: 'resolution_executed',
