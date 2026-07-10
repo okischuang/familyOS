@@ -12,9 +12,13 @@ GitHub Actions wires validation on every change and deployment on demand.
 | Workflow | File | Trigger | Secrets | What it does |
 |---|---|---|---|---|
 | **CI** | `.github/workflows/ci.yml` | every PR + push to `main` | none | App: `typecheck` + `lint`. Backend: `typecheck` + `build`. Fails the check if either breaks. |
-| **AI Code Review** | `.github/workflows/code-review.yml` | PR opened/updated | `OPENAI_API_KEY` | Posts an automated review comment. |
 | **Deploy Backend** | `.github/workflows/deploy-backend.yml` | push to `main` touching `backend/**`, `firestore.*`, `firebase.json` · or manual | `FIREBASE_SERVICE_ACCOUNT` | Builds functions, deploys `functions` + `firestore` to project `laxie-family-os-f7077`. |
 | **EAS Build** | `.github/workflows/eas-build.yml` | manual (`workflow_dispatch`) | `EXPO_TOKEN` | Runs `eas build` for the chosen platform/profile. |
+
+> Code review is handled by **Claude Code** (in-editor / PR review), not a
+> GitHub Actions bot. The former OpenAI-based `code-review.yml` workflow was
+> removed; `OPENAI_API_KEY` is no longer used by CI and can be deleted from the
+> repo secrets.
 
 ## Safe-by-default deploys
 
@@ -41,10 +45,6 @@ Add these under **Settings → Secrets and variables → Actions**.
 2. Paste the token as the secret value.
 3. `app/eas.json` already defines `development` / `preview` / `production`
    profiles; the project is `owner: okischuang`, slug `laxie`.
-
-### `OPENAI_API_KEY` (AI code review — already referenced)
-
-Used by the existing code-review workflow.
 
 ## Running things locally
 
