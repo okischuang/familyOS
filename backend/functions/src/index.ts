@@ -22,6 +22,7 @@ import {
   getScheduledResolutions,
 } from './resolution/index.js';
 import { generateAndUpdateResolutionMessage } from './language-actuator/index.js';
+import { arbitrate, markSuperseded } from './risk-arbiter/index.js';
 import {
   fetchCalendarEvents,
   syncEventsToFirestore,
@@ -171,6 +172,15 @@ export const onRiskCreated = onDocumentCreated(
 
     const riskId = event.params.riskId;
     console.log(`New risk detected: ${riskId}, type: ${riskData.type}`);
+
+    // Risk Arbiter: converge risks that describe the same underlying situation
+    // so the family gets one coordinated response, not several.
+    const arbitration = await arbitrate({ ...riskData, id: riskId });
+    if (arbitration.action === 'suppress') {
+      console.log(`Arbiter suppressed risk ${riskId}: ${arbitration.reason}`);
+      await markSuperseded(riskId, arbitration);
+      return;
+    }
 
     // Get a user from the family to determine autonomy level
     const usersSnapshot = await db

@@ -372,8 +372,12 @@ async function saveRisk(risk: Risk): Promise<SaveResult> {
   if (existing.exists) {
     const existingRisk = existing.data() as Risk;
 
-    // Don't update if already resolved or expired
-    if (existingRisk.status === 'resolved' || existingRisk.status === 'expired') {
+    // Don't update if already resolved, expired, or merged by the arbiter
+    if (
+      existingRisk.status === 'resolved' ||
+      existingRisk.status === 'expired' ||
+      existingRisk.status === 'superseded'
+    ) {
       return 'skipped';
     }
 
