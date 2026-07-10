@@ -1,0 +1,82 @@
+name: Deploy Backend
+
+# Deploys Firebase Cloud Functions + Firestore rules/indexes.
+#
+# SAFE BY DEFAULT: the deploy steps are gated on the FIREBASE_SERVICE_ACCOUNT
+# secret. Until you add it (Settings → Secrets and variables → Actions), this
+# workflow runs, prints a notice, and does nothing — no deploy can fire without
+# your explicit opt-in. Adding the secret is what turns it on.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/functions/**'
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+      - 'firebase.json'
+      - '.firebaserc'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build + deploy to Firebase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for service account secret
+        id: guard
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::FIREBASE_SERVICE_ACCOUNT is not set — skipping deploy. Add the secret to enable automatic backend deploys."
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.ok == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: steps.guard.outputs.ok == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/functions/package-lock.json
+
+      - name: Install dependencies
+        if: steps.guard.outputs.ok == 'true'
+        working-directory: backend/functions
+        run: npm ci
+
+      - name: Build functions
+        if: steps.guard.outputs.ok == 'true'
+        working-directory: backend/functions
+        run: npm run build
+
+      - name: Write service account credentials
+        if: steps.guard.outputs.ok == 'true'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/service-account.json" >> "$GITHUB_ENV"
+
+      - name: Deploy functions + Firestore
+        if: steps.guard.outputs.ok == 'true'
+        run: >
+          npx firebase-tools@13 deploy
+          --only functions,firestore
+          --project laxie-family-os-f7077
+          --non-interactive
+          --force
