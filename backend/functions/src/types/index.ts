@@ -16,7 +16,10 @@ export type RiskType =
   | 'schedule_overlap'
   | 'subscription_waste';
 export type RiskSeverity = 'high' | 'low';
-export type RiskStatus = 'pending' | 'resolving' | 'resolved' | 'expired';
+// 'superseded' = the Risk Arbiter merged this risk into another active
+// resolution that already covers the same underlying situation, so it does not
+// get its own resolution (avoids double-notifying the family — Principle 4).
+export type RiskStatus = 'pending' | 'resolving' | 'resolved' | 'expired' | 'superseded';
 
 export interface Risk {
   id: string;
