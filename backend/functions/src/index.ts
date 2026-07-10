@@ -173,47 +173,56 @@ export const onRiskCreated = onDocumentCreated(
     const riskId = event.params.riskId;
     console.log(`New risk detected: ${riskId}, type: ${riskData.type}`);
 
-    // Risk Arbiter: converge risks that describe the same underlying situation
-    // so the family gets one coordinated response, not several.
-    const arbitration = await arbitrate({ ...riskData, id: riskId });
-    if (arbitration.action === 'suppress') {
-      console.log(`Arbiter suppressed risk ${riskId}: ${arbitration.reason}`);
-      await markSuperseded(riskId, arbitration);
-      return;
-    }
-
-    // Get a user from the family to determine autonomy level
-    const usersSnapshot = await db
-      .collection('users')
-      .where('familyId', '==', riskData.familyId)
-      .limit(1)
-      .get();
-
-    if (usersSnapshot.empty) {
-      console.error(`No users found for family ${riskData.familyId}`);
-      return;
-    }
-
-    const userId = usersSnapshot.docs[0].id;
-
-    try {
-      // Create resolution
-      const { resolution, autonomyLevel } = await createResolutionForRisk(
-        { ...riskData, id: riskId },
-        userId
-      );
-
-      // Generate message using Language Actuator
-      await generateAndUpdateResolutionMessage(resolution.id);
-
-      console.log(
-        `Resolution created: ${resolution.id}, autonomy level: ${autonomyLevel}`
-      );
-    } catch (error) {
-      console.error(`Error creating resolution for risk ${riskId}:`, error);
-    }
+    await resolveRisk({ ...riskData, id: riskId });
   }
 );
+
+/**
+ * Route a risk through the Risk Arbiter and, if it isn't merged away, into a
+ * resolution with a generated message. The Autonomy Governor sets the level
+ * inside createResolutionForRisk. Shared by onRiskCreated and revival.
+ */
+async function resolveRisk(risk: Risk): Promise<void> {
+  const arbitration = await arbitrate(risk);
+  if (arbitration.action === 'suppress') {
+    console.log(`Arbiter suppressed risk ${risk.id}: ${arbitration.reason}`);
+    await markSuperseded(risk.id, arbitration);
+    return;
+  }
+
+  try {
+    const { resolution, autonomyLevel } = await createResolutionForRisk(risk);
+    await generateAndUpdateResolutionMessage(resolution.id);
+    console.log(`Resolution created: ${resolution.id}, autonomy level: ${autonomyLevel}`);
+  } catch (error) {
+    console.error(`Error creating resolution for risk ${risk.id}:`, error);
+  }
+}
+
+/**
+ * When a covering resolution is vetoed, revive the risks the arbiter merged
+ * into it: reset them to pending and re-route them. The vetoed resolution is no
+ * longer scheduled, so they won't be suppressed by it again.
+ */
+async function reviveSupersededRisks(vetoedResolutionId: string): Promise<void> {
+  const snapshot = await db
+    .collection('risks')
+    .where('supersededByResolution', '==', vetoedResolutionId)
+    .get();
+
+  for (const doc of snapshot.docs) {
+    const risk = { ...(doc.data() as Risk), id: doc.id };
+    if (risk.status !== 'superseded') continue;
+
+    console.log(`Reviving superseded risk ${risk.id} after veto of ${vetoedResolutionId}`);
+    await db.collection('risks').doc(risk.id).update({
+      status: 'pending',
+      supersededByResolution: null,
+      supersededByRisk: null,
+    });
+    await resolveRisk({ ...risk, status: 'pending' });
+  }
+}
 
 // ============================================
 // Callable Functions (for App)
@@ -223,7 +232,8 @@ export const onRiskCreated = onDocumentCreated(
  * Veto a scheduled resolution
  */
 export const vetoScheduledResolution = onCall(
-  { enforceAppCheck: false },
+  // Reviving a superseded risk regenerates a message via the Language Actuator.
+  { enforceAppCheck: false, secrets: ['OPENAI_API_KEY'] },
   async (request) => {
     const { resolutionId, reason } = request.data;
 
@@ -233,6 +243,10 @@ export const vetoScheduledResolution = onCall(
 
     try {
       const success = await vetoResolution(resolutionId, reason);
+      if (success) {
+        // Any risk the arbiter merged into this resolution now needs its own.
+        await reviveSupersededRisks(resolutionId);
+      }
       return { success, message: success ? 'Resolution vetoed' : 'Could not veto' };
     } catch (error) {
       console.error('Error vetoing resolution:', error);
