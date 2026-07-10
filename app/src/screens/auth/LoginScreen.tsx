@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+} from 'react-native';
 import { useStore } from '../../hooks/useStore';
 
 export default function LoginScreen() {
@@ -30,22 +38,24 @@ export default function LoginScreen() {
     // Navigation happens automatically via conditional rendering in App.tsx
   };
 
+  const canSubmit = name.trim().length > 0;
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      className="flex-1 bg-gray-50"
+      style={styles.container}
     >
-      <View className="flex-1 justify-center px-8">
-        <View className="items-center mb-8">
-          <Text className="text-5xl mb-4">👨‍👩‍👧‍👦</Text>
-          <Text className="text-3xl font-bold text-gray-800">Laxie</Text>
-          <Text className="text-gray-500 mt-2">家庭協調助手</Text>
+      <View style={styles.content}>
+        <View style={styles.logoBlock}>
+          <Text style={styles.emoji}>👨‍👩‍👧‍👦</Text>
+          <Text style={styles.brand}>Laxie</Text>
+          <Text style={styles.tagline}>家庭協調助手</Text>
         </View>
 
-        <View className="mb-6">
-          <Text className="text-sm text-gray-600 mb-2">你的名字</Text>
+        <View style={styles.field}>
+          <Text style={styles.label}>你的名字</Text>
           <TextInput
-            className="bg-white border border-gray-300 rounded-lg px-4 py-3 text-base"
+            style={styles.input}
             placeholder="例如：小明"
             value={name}
             onChangeText={setName}
@@ -54,19 +64,83 @@ export default function LoginScreen() {
         </View>
 
         <TouchableOpacity
-          className={`py-4 rounded-lg ${name.trim() ? 'bg-gray-800' : 'bg-gray-300'}`}
+          style={[styles.button, canSubmit ? styles.buttonActive : styles.buttonDisabled]}
           onPress={handleLogin}
-          disabled={!name.trim()}
+          disabled={!canSubmit}
         >
-          <Text className="text-white text-center font-semibold text-base">
-            開始使用
-          </Text>
+          <Text style={styles.buttonText}>開始使用</Text>
         </TouchableOpacity>
 
-        <Text className="text-center text-gray-400 text-xs mt-6">
-          Demo 版本 - 無需真實登入
-        </Text>
+        <Text style={styles.footnote}>Demo 版本 - 無需真實登入</Text>
       </View>
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f9fafb',
+  },
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  logoBlock: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  emoji: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  brand: {
+    fontSize: 30,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+  tagline: {
+    color: '#6b7280',
+    marginTop: 8,
+  },
+  field: {
+    marginBottom: 24,
+  },
+  label: {
+    fontSize: 14,
+    color: '#4b5563',
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  button: {
+    paddingVertical: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  buttonActive: {
+    backgroundColor: '#1f2937',
+  },
+  buttonDisabled: {
+    backgroundColor: '#d1d5db',
+  },
+  buttonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  footnote: {
+    textAlign: 'center',
+    color: '#9ca3af',
+    fontSize: 12,
+    marginTop: 24,
+  },
+});

@@ -1,0 +1,83 @@
+name: EAS Build
+
+# Builds the Expo app with EAS. Manual trigger only — mobile builds consume
+# EAS quota, so they run when you ask, not on every push.
+#
+# SAFE BY DEFAULT: gated on the EXPO_TOKEN secret. Without it the workflow runs,
+# prints a notice, and does nothing. Add EXPO_TOKEN (Settings → Secrets) and an
+# `expo` account/project to enable real builds.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build
+        type: choice
+        default: all
+        options:
+          - all
+          - ios
+          - android
+      profile:
+        description: EAS build profile (see app/eas.json)
+        type: choice
+        default: preview
+        options:
+          - preview
+          - production
+          - development
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: EAS build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Check for Expo token secret
+        id: guard
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::EXPO_TOKEN is not set — skipping. Add the secret to enable EAS builds."
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.ok == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: steps.guard.outputs.ok == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Setup EAS CLI
+        if: steps.guard.outputs.ok == 'true'
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        if: steps.guard.outputs.ok == 'true'
+        run: npm ci
+
+      - name: Build
+        if: steps.guard.outputs.ok == 'true'
+        run: >
+          eas build
+          --non-interactive
+          --no-wait
+          --platform ${{ inputs.platform }}
+          --profile ${{ inputs.profile }}

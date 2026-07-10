@@ -9,9 +9,11 @@ import AlertDetailScreen from '../screens/alerts/AlertDetailScreen';
 import SolutionsScreen from '../screens/alerts/SolutionsScreen';
 import ConfirmScreen from '../screens/alerts/ConfirmScreen';
 import { AuditScreen, PendingActionsScreen } from '../screens/audit';
+import { SubscriptionsScreen, SubscriptionActionScreen } from '../screens/subscriptions';
 
 type TabParamList = {
   HomeTab: undefined;
+  SubscriptionsTab: undefined;
   PendingTab: undefined;
   AuditTab: undefined;
 };
@@ -23,6 +25,7 @@ const Tab = createBottomTabNavigator<TabParamList>();
 function TabIcon({ name, focused }: { name: string; focused: boolean }) {
   const icons: Record<string, string> = {
     '首頁': '🏠',
+    '訂閱': '💳',
     '待執行': '⏰',
     '紀錄': '📋',
   };
@@ -69,6 +72,14 @@ function MainTabs() {
         options={{
           title: 'Laxie',
           tabBarIcon: ({ focused }) => <TabIcon name="首頁" focused={focused} />,
+        }}
+      />
+      <Tab.Screen
+        name="SubscriptionsTab"
+        component={SubscriptionsScreen}
+        options={{
+          title: '訂閱管家',
+          tabBarIcon: ({ focused }) => <TabIcon name="訂閱" focused={focused} />,
         }}
       />
       <Tab.Screen
@@ -140,6 +151,13 @@ export default function RootNavigator() {
           component={ConfirmScreen}
           options={{
             title: '確認協調',
+          }}
+        />
+        <Stack.Screen
+          name="SubscriptionAction"
+          component={SubscriptionActionScreen}
+          options={{
+            title: '訂閱決策',
           }}
         />
       </Stack.Navigator>

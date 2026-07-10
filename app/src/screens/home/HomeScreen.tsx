@@ -10,6 +10,8 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList, Alert } from '../../types';
+import { MOCK_SUBSCRIPTIONS } from '../../data/subscriptions';
+import { generateSubscriptionAlerts } from '../../services/subscriptions';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -50,7 +52,10 @@ export default function HomeScreen() {
         updatedAt: new Date(),
       },
     ];
-    setAlerts(mockAlerts);
+    // Fold in forward-looking subscription-waste risks: idle services about to
+    // auto-renew surface here *before* they charge, not after.
+    const subscriptionAlerts = generateSubscriptionAlerts(MOCK_SUBSCRIPTIONS);
+    setAlerts([...mockAlerts, ...subscriptionAlerts]);
   };
 
   useEffect(() => {
@@ -108,7 +113,14 @@ export default function HomeScreen() {
               <TouchableOpacity
                 key={alert.id}
                 style={styles.alertCard}
-                onPress={() => navigation.navigate('AlertDetail', { alertId: alert.id })}
+                onPress={() => {
+                  const subId = alert.relatedSubscriptionIds?.[0];
+                  if (alert.type === 'subscription_waste' && subId) {
+                    navigation.navigate('SubscriptionAction', { subscriptionId: subId });
+                  } else {
+                    navigation.navigate('AlertDetail', { alertId: alert.id });
+                  }
+                }}
               >
                 <Text style={styles.alertTitle}>
                   {index + 1}. {alert.title}
