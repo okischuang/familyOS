@@ -214,6 +214,11 @@ export interface Subscription {
   startedDate: Timestamp;
   lastUsedDate?: Timestamp;       // Last time any family member used the service
   usagePerMonth: number;          // Detected uses per month (opens/sessions/plays)
+  // Whether we have a real usage signal yet. Discovery (from email/bank) finds
+  // that a subscription EXISTS and what it costs, but not how much it's used —
+  // such records are usageTracked=false, and the waste Sensor must not flag
+  // them as unused until a usage signal arrives.
+  usageTracked?: boolean;
   autoRenew: boolean;
   detectedFrom: 'bank' | 'email' | 'app_store' | 'manual';
   sharedWith?: string[];
