@@ -9,7 +9,12 @@ import { Timestamp } from 'firebase-admin/firestore';
 // Risk Types
 // ============================================
 
-export type RiskType = 'pickup_conflict' | 'pickup_handoff' | 'deadline_miss' | 'schedule_overlap';
+export type RiskType =
+  | 'pickup_conflict'
+  | 'pickup_handoff'
+  | 'deadline_miss'
+  | 'schedule_overlap'
+  | 'subscription_waste';
 export type RiskSeverity = 'high' | 'low';
 export type RiskStatus = 'pending' | 'resolving' | 'resolved' | 'expired';
 
@@ -156,6 +161,54 @@ export interface CalendarEvent {
 
   // For conflict detection
   isBusy: boolean;                // busy/free status
+
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// ============================================
+// Subscription Types
+//
+// Money is a shared family resource. An idle subscription that keeps
+// auto-renewing is exactly the high-frequency, predictable, low-creativity
+// waste the system exists to remove. The Subscription Sensor Agent reads these
+// docs (detected from bank/email/app-store, never typed in) and emits
+// `subscription_waste` risks before the next charge.
+// ============================================
+
+export type SubscriptionCategory =
+  | 'streaming'
+  | 'music'
+  | 'productivity'
+  | 'cloud'
+  | 'fitness'
+  | 'news'
+  | 'gaming'
+  | 'education'
+  | 'other';
+
+export type BillingCycle = 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+
+// How the subscription is behaving, derived from usage signals.
+export type SubscriptionStatus = 'active' | 'idle' | 'unused' | 'cancelled';
+
+export interface Subscription {
+  id: string;
+  familyId: string;
+  name: string;
+  category: SubscriptionCategory;
+  icon: string;
+  amount: number;                 // Charged per billing cycle, in `currency`
+  currency: string;
+  billingCycle: BillingCycle;
+  nextRenewalDate: Timestamp;
+  startedDate: Timestamp;
+  lastUsedDate?: Timestamp;       // Last time any family member used the service
+  usagePerMonth: number;          // Detected uses per month (opens/sessions/plays)
+  autoRenew: boolean;
+  detectedFrom: 'bank' | 'email' | 'app_store' | 'manual';
+  sharedWith?: string[];
+  status: SubscriptionStatus;
 
   createdAt: Timestamp;
   updatedAt: Timestamp;

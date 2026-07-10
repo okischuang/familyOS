@@ -24,6 +24,12 @@ service cloud.firestore {
       allow write: if false; // Only backend can write
     }
 
+    // Subscriptions collection (detected from bank/email/app-store)
+    match /subscriptions/{subscriptionId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only backend can write
+    }
+
     // Resolutions collection
     match /resolutions/{resolutionId} {
       allow read: if request.auth != null;
