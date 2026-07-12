@@ -40,6 +40,9 @@ jobs:
     steps:
       - name: Check for Expo token secret
         id: guard
+        # Runs before checkout, so the job-level working-directory (app) does
+        # not exist yet — pin this step to the workspace root, which always does.
+        working-directory: ${{ github.workspace }}
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
