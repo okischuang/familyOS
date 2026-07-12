@@ -114,8 +114,14 @@ async function detectWasteForFamily(familyId: string): Promise<FamilyDetectionRe
 /**
  * Unused = never used, or untouched past the threshold. The whole recurring
  * charge is money down the drain.
+ *
+ * We can only call something "unused" if we actually have a usage signal. A
+ * subscription found by the Discovery Agent (usageTracked !== true) is known to
+ * exist and cost money, but its usage is unmeasured — flagging it as waste
+ * would be a false alarm, so we skip it until a usage signal arrives.
  */
 function isUnused(sub: Subscription, now: Date): boolean {
+  if (sub.usageTracked !== true) return false;
   const idleDays = daysSince(sub.lastUsedDate?.toDate(), now);
   return sub.usagePerMonth <= 0 || (idleDays !== null && idleDays >= UNUSED_DAYS);
 }

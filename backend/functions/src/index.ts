@@ -32,6 +32,7 @@ import {
 } from './calendar/index.js';
 import { registerFcmToken, sendPushToUser } from './notifications/index.js';
 import { runSubscriptionDetection } from './subscription-detection/index.js';
+import { runSubscriptionDiscovery } from './subscription-discovery/index.js';
 import type { Risk, Subscription, User } from './types/index.js';
 
 // Initialize Firebase Admin
@@ -149,6 +150,27 @@ export const scheduledSubscriptionDetection = onSchedule(
     const result = await runSubscriptionDetection();
     console.log(
       `Subscription detection complete: ${result.risksCreated} created, ${result.risksUpdated} updated, ${result.familiesProcessed} families processed`
+    );
+  }
+);
+
+/**
+ * Subscription Discovery Scheduler
+ * Runs daily (before waste detection) to find subscriptions from Gmail receipts
+ * and write them into subscriptions/, so the Sensor has something to assess.
+ */
+export const scheduledSubscriptionDiscovery = onSchedule(
+  {
+    schedule: 'every day 08:00',
+    timeZone: 'Asia/Taipei',
+    retryCount: 3,
+    secrets: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+  },
+  async () => {
+    console.log('Starting scheduled subscription discovery...');
+    const result = await runSubscriptionDiscovery();
+    console.log(
+      `Subscription discovery complete: ${result.usersScanned} users, ${result.messagesScanned} messages, ${result.subscriptionsDiscovered} subscriptions`
     );
   }
 );
@@ -584,6 +606,18 @@ export const triggerSubscriptionDetection = onRequest(
 );
 
 /**
+ * Manual trigger for Gmail subscription discovery (for testing)
+ */
+export const triggerSubscriptionDiscovery = onRequest(
+  { cors: true, secrets: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'] },
+  async (req, res) => {
+    console.log('Manual subscription discovery triggered');
+    const result = await runSubscriptionDiscovery();
+    res.json(result);
+  }
+);
+
+/**
  * Seed Test Subscriptions (for development only)
  * Mirrors the app's mock set: two clearly-wasteful subs about to renew (should
  * each produce a subscription_waste risk) and one active sub (should be skipped).
@@ -610,6 +644,7 @@ export const seedTestSubscriptions = onRequest(
         startedDate: daysAgo(210),
         lastUsedDate: daysAgo(74),
         usagePerMonth: 0,
+        usageTracked: true,
         autoRenew: true,
         detectedFrom: 'app_store',
         status: 'unused',
@@ -628,6 +663,7 @@ export const seedTestSubscriptions = onRequest(
         nextRenewalDate: daysAhead(1),
         startedDate: daysAgo(60),
         usagePerMonth: 0,
+        usageTracked: true,
         autoRenew: true,
         detectedFrom: 'bank',
         status: 'unused',
@@ -647,6 +683,7 @@ export const seedTestSubscriptions = onRequest(
         startedDate: daysAgo(430),
         lastUsedDate: daysAgo(1),
         usagePerMonth: 22,
+        usageTracked: true,
         autoRenew: true,
         detectedFrom: 'bank',
         sharedWith: ['you', 'partner'],

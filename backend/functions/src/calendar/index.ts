@@ -28,6 +28,9 @@ function getOAuth2Client(redirectUri?: string) {
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/calendar.events.readonly',
+  // Read-only Gmail access powers the Subscription Discovery Agent (finds
+  // subscription receipts). Users must re-consent to grant this scope.
+  'https://www.googleapis.com/auth/gmail.readonly',
 ];
 
 /**
@@ -141,7 +144,7 @@ export async function refreshAccessToken(user: User): Promise<string> {
   return credentials.access_token!;
 }
 
-async function getValidAccessToken(user: User): Promise<string> {
+export async function getValidAccessToken(user: User): Promise<string> {
   if (!user.googleCalendar) {
     throw new Error('Google Calendar not connected');
   }
